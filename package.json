@@ -1,0 +1,50 @@
+{
+  "name": "passport-google-verify-token",
+  "version": "1.0.0",
+  "description": "Google Token strategy for Passport, let's you validate the user token server side, usefull for mobile app Google authentication for example. The validation is done by the official Google Auth library for NodeJs.",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib/**/*"
+  ],
+  "scripts": {
+    "clean": "rimraf lib",
+    "test": "mocha -r ts-node/register tests/**/*.test.ts",
+    "cover": "nyc -r lcov -e .ts -x \"*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts && nyc report",
+    "lint": "tslint -p tsconfig.json",
+    "build": "tsc",
+    "prepublish": "npm run clean && npm run lint && npm run test && npm run build"
+  },
+  "keywords": [
+    "passport",
+    "google",
+    "token",
+    "authentication",
+    "nodejs"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abouroubi/passport-google-verify-token.git"
+  },
+  "author": "Abdou BOUROUBI",
+  "license": "MIT",
+  "dependencies": {
+    "google-auth-library": "^2.0.1",
+    "passport-strategy": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.1.7",
+    "@types/mocha": "^5.2.5",
+    "@types/passport-strategy": "^0.2.35",
+    "chai": "^4.2.0",
+    "chai-passport-strategy": "^1.0.1",
+    "mocha": "^5.2.0",
+    "nyc": "^13.1.0",
+    "prettier": "^1.15.3",
+    "rimraf": "^2.6.2",
+    "ts-node": "^7.0.1",
+    "tslint": "^5.11.0",
+    "tslint-config-prettier": "^1.17.0",
+    "typescript": "^3.2.2"
+  }
+}
