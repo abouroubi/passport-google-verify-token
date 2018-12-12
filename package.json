@@ -13,7 +13,7 @@
     "cover": "nyc -r lcov -e .ts -x \"*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts && nyc report",
     "lint": "tslint -p tsconfig.json",
     "build": "tsc",
-    "prepublish": "npm run clean && npm run lint && npm run test && npm run build"
+    "prepare": "npm run clean && npm run lint && npm run test && npm run build"
   },
   "keywords": [
     "passport",
