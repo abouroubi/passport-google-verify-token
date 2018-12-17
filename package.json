@@ -12,8 +12,7 @@
     "test": "mocha -r ts-node/register tests/**/*.test.ts --reporter mocha-junit-reporter --reporter-options mochaFile=./TEST-RESULTS.xml",
     "cover": "nyc -r lcov -e .ts -x \"*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts && nyc report",
     "lint": "tslint -p tsconfig.json",
-    "build": "tsc",
-    "prepare": "npm run clean && npm run lint && npm run test && npm run build"
+    "build": "tsc"
   },
   "keywords": [
     "passport",
@@ -40,7 +39,6 @@
     "chai-passport-strategy": "^1.0.1",
     "mocha": "^5.2.0",
     "mocha-junit-reporter": "^1.18.0",
-
     "nyc": "^13.1.0",
     "prettier": "^1.15.3",
     "rimraf": "^2.6.2",
