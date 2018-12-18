@@ -1,5 +1,7 @@
 # passport-google-verify-token
 
+[![Build Status](https://dev.azure.com/abdouslayne/Personal%20Projects/_apis/build/status/passport-google-verify-token?branchName=master)](https://dev.azure.com/abdouslayne/Personal%20Projects/_build/latest?definitionId=2?branchName=master)
+[![npm version](https://badge.fury.io/js/passport-google-verify-token.svg)](https://badge.fury.io/js/passport-google-verify-token)
 ![License](https://img.shields.io/npm/l/passport-facebook-token.svg)
 
 
