@@ -62,6 +62,7 @@ export class GoogleTokenStrategy extends Strategy {
     this.name = 'google-verify-token';
     this.googleAuthClient = new OAuth2Client(this.clientID);
     this.verify = verify;
+    this.audience = options.audience ? options.audience : options.clientID;
   }
 
   /**
@@ -120,9 +121,7 @@ export class GoogleTokenStrategy extends Strategy {
   public verifyGoogleToken(idToken: string, clientID: string | [], done: (...args: any[]) => void) {
     this.googleAuthClient.verifyIdToken(
       {
-        audience: clientID, // Specify the CLIENT_ID of the app that accesses the backend
-        // Or, if multiple clients access the backend:
-        // [CLIENT_ID_1, CLIENT_ID_2, CLIENT_ID_3]
+        audience: this.audience,
         idToken,
       },
       (err, loginTicket) => {
