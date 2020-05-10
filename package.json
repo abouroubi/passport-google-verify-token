@@ -1,6 +1,6 @@
 {
   "name": "passport-google-verify-token",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "Google Token strategy for Passport, let's you validate the user token server side, usefull for mobile app Google authentication for example. The validation is done by the official Google Auth library for NodeJs.",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -28,24 +28,24 @@
   "author": "Abdou BOUROUBI",
   "license": "MIT",
   "dependencies": {
-    "google-auth-library": "^5.8.0",
+    "google-auth-library": "^6.0.0",
     "passport-strategy": "^1.0.0"
   },
   "devDependencies": {
-    "@types/chai": "^4.2.7",
-    "@types/mocha": "^5.2.7",
-    "@types/node": "^13.1.4",
+    "@types/chai": "^4.2.11",
+    "@types/mocha": "^7.0.2",
+    "@types/node": "^13.13.5",
     "@types/passport-strategy": "^0.2.35",
     "chai": "^4.2.0",
     "chai-passport-strategy": "^1.0.1",
-    "mocha": "^6.2.2",
-    "mocha-junit-reporter": "^1.23.1",
-    "nyc": "^15.0.0",
-    "prettier": "^1.19.1",
-    "rimraf": "^2.7.1",
-    "ts-node": "^8.5.4",
-    "tslint": "^5.20.1",
+    "mocha": "^7.1.2",
+    "mocha-junit-reporter": "^1.23.3",
+    "nyc": "^15.0.1",
+    "prettier": "^2.0.5",
+    "rimraf": "^3.0.2",
+    "ts-node": "^8.10.1",
+    "tslint": "^6.1.2",
     "tslint-config-prettier": "^1.18.0",
-    "typescript": "^3.7.4"
+    "typescript": "^3.8.3"
   }
 }
