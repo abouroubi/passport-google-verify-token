@@ -1,5 +1,4 @@
-name: Test, Publish
-
+name: Test on pull
 on:
   push:
     branches: [ master ]
