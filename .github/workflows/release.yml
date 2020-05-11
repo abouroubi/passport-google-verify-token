@@ -43,3 +43,5 @@ jobs:
         node-version: 12.x
     - name: GH Release
       uses: softprops/action-gh-release@v0.1.5
+      with:
+        tag_name: steps.build.new_tag
