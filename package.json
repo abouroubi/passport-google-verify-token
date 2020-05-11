@@ -1,6 +1,6 @@
 {
   "name": "passport-google-verify-token",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Google Token strategy for Passport, let's you validate the user token server side, usefull for mobile app Google authentication for example. The validation is done by the official Google Auth library for NodeJs.",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
