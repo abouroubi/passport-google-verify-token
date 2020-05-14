@@ -42,6 +42,7 @@ export class GoogleTokenStrategy extends Strategy {
   public verify: (...args: any[]) => void;
   public clientID: string;
   public passReqToCallback: boolean;
+  public audience: string[];
 
   constructor(options: (() => void) | any, verify?: (...args: any[]) => void) {
     super();
