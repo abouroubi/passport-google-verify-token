@@ -30,9 +30,9 @@ supplying a `parsedToken` (with all its information in visible form) and the
 
 ```js
 passport.use(new GoogleTokenStrategy({
-      clientID: '12345.abcdefghijkl.apps.googleusercontent.com'// Specify the CLIENT_ID of the app that accesses the backend
-     // Or, if multiple clients access the backend:
-     //[CLIENT_ID_1, CLIENT_ID_2, CLIENT_ID_3]
+      clientID: '12345.abcdefghijkl.apps.googleusercontent.com'// Specify the CLIENT_ID of the backend
+     // If other clients (such as android / ios apps) also access the google api:
+     // audience: [CLIENT_ID_FOR_THE_BACKEND, CLIENT_ID_ANDROID, CLIENT_ID_IOS, CLIENT_ID_SPA]
     },
     function(parsedToken, googleId, done) {
       User.findOrCreate(..., function (err, user) {
