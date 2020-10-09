@@ -23,9 +23,15 @@ jobs:
     - run: npm run build
     - name: Automated Version Bump
       uses: phips28/gh-action-bump-version@master
+    - name: Export TAG Parameter
+      id: tag_name
+      run: |
+        echo ::set-output name=TAG::`cat package.json | jq -r .version`
+      shell: bash
     - name: Github Tag
-      uses: mathieudutour/github-tag-action@v4.2
+      uses: mathieudutour/github-tag-action@v4.6
       with:
+        custom_tag: ${{ steps.tag_name.outputs.TAG }}
         # Required for permission to tag the repo.
         github_token: ${{ secrets.GITHUB_TOKEN }}
 
