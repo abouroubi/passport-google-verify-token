@@ -13,6 +13,8 @@ jobs:
     if: "!contains(github.event.head_commit.message, 'version bump to')"
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      tag: ${{ steps.tag_name.outputs.TAG }}
     steps:
     - uses: actions/checkout@v2
     - name: Use Node.js 12.x
@@ -50,4 +52,4 @@ jobs:
     - name: GH Release
       uses: softprops/action-gh-release@v0.1.5
       with:
-        tag_name: ${{ jobs.build.steps.build.new_tag }} 
+        tag_name: ${{ needs.build.outputs.tag }} 
