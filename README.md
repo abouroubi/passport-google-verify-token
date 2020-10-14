@@ -44,11 +44,11 @@ passport.use(new GoogleTokenStrategy({
 
 ### Authenticate Requests
 
-Use `passport.authenticate()`, specifying the `'google-verifiy-token'` strategy, to authenticate requests.
+Use `passport.authenticate()`, specifying the `'google-verify-token'` strategy, to authenticate requests.
 
 ```js
 app.post('/auth/google/token',
-  passport.authenticate('google-verifiy-token'),
+  passport.authenticate('google-verify-token'),
   function (req, res) {
     // do something with req.user
     res.send(req.user? 200 : 401);
@@ -62,7 +62,7 @@ Or using Sails framework:
 // api/controllers/AuthController.js
 module.exports = {
   facebook: function(req, res) {
-    passport.authenticate('google-verifiy-token', function(error, user, info) {
+    passport.authenticate('google-verify-token', function(error, user, info) {
       // do stuff with user
       res.ok();
     })(req, res);
@@ -72,7 +72,7 @@ module.exports = {
 
 ### Client Requests
 
-Clients can send requests to routes that use google-verifiy-token authentication using query parms, body, or HTTP headers. Clients will need to transmit the `access_token` or the `id_token` that are received from Google after user logs in.
+Clients can send requests to routes that use google-verify-token authentication using query parms, body, or HTTP headers. Clients will need to transmit the `access_token` or the `id_token` that are received from Google after user logs in.
 
 #### Sending access_token as a Query parameter
 
