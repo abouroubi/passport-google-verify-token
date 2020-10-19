@@ -12,7 +12,8 @@
     "test": "mocha -r ts-node/register tests/**/*.test.ts --reporter mocha-junit-reporter --reporter-options mochaFile=./TEST-RESULTS.xml",
     "cover": "nyc -r lcov -e .ts -x \"*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts && nyc report",
     "lint": "tslint -p tsconfig.json",
-    "build": "tsc"
+    "build": "tsc",
+    "prepublish": "npm run clean && npm run build"
   },
   "keywords": [
     "passport",
