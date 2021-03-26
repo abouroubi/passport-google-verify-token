@@ -29,6 +29,8 @@ supplying a `parsedToken` (with all its information in visible form) and the
 `googleId`.
 
 ```js
+var GoogleTokenStrategy = require("passport-google-verify-token").Strategy;
+
 passport.use(new GoogleTokenStrategy({
       clientID: '12345.abcdefghijkl.apps.googleusercontent.com'// Specify the CLIENT_ID of the backend
      // If other clients (such as android / ios apps) also access the google api:
