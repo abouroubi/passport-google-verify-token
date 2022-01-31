@@ -94,7 +94,7 @@ describe('Strategy', () => {
           info = i;
           done();
         })
-        .req(reqFunction)
+        .request(reqFunction)
         .authenticate();
     });
 
@@ -156,7 +156,7 @@ describe('Strategy', () => {
           error = u;
           done();
         })
-        .req(reqFunction)
+        .request(reqFunction)
         .authenticate();
     });
 
