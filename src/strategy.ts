@@ -67,6 +67,38 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   /**
+   * Internal function that handles successes/failures
+   * 
+   * @param {any} err 
+   * @param {any} parsedToken 
+   * @param {any?} info
+   */
+  private done(err: any, parsedToken: any, info?: any) {
+    if (err) {
+      return this.fail({ message: err.message }, 401);
+    }
+
+    if (!parsedToken) {
+      return this.fail(info);
+    }
+
+    const verified = (error: any, user: any, infoOnUser: any) => {
+      if (error) {
+        return this.error(error);
+      }
+      if (!user) {
+        return this.fail(infoOnUser);
+      }
+      this.success(user, infoOnUser);
+    };
+
+    if (parsedToken.sub) this.verify(parsedToken, parsedToken.sub, verified);
+    else {
+      this.verify(parsedToken, parsedToken, verified)
+    }
+  }
+
+  /**
    * Authenticate request by verifying the token
    *
    * @param {Object} req
@@ -75,67 +107,76 @@ export class GoogleTokenStrategy extends Strategy {
   public authenticate(req: any, options: any) {
     options = options || {};
 
+    const accessToken = this.paramFromRequest(req, 'access_token');
     const idToken =
       this.paramFromRequest(req, 'id_token') ||
-      this.paramFromRequest(req, 'access_token') ||
       this.getBearerToken(req.headers);
 
-    if (!idToken) {
-      return this.fail({ message: 'no ID token provided' }, 401);
+    if (idToken) this.verifyGoogleIdToken(idToken, this.clientID)
+    else if (accessToken) this.verifyGoogleAccessToken(accessToken)
+    else {
+      return this.fail({ message: 'no Google authentication token provided' }, 401);
     }
-
-    this.verifyGoogleToken(idToken, this.clientID, (err: any, parsedToken: any, info: any) => {
-      if (err) {
-        return this.fail({ message: err.message }, 401);
-      }
-
-      if (!parsedToken) {
-        return this.fail(info);
-      }
-
-      const verified = (error: any, user: any, infoOnUser: any) => {
-        if (error) {
-          return this.error(error);
-        }
-        if (!user) {
-          return this.fail(infoOnUser);
-        }
-        this.success(user, infoOnUser);
-      };
-
-      if (this.passReqToCallback) {
-        this.verify(req, parsedToken, parsedToken.sub, verified);
-      } else {
-        this.verify(parsedToken, parsedToken.sub, verified);
-      }
-    });
   }
 
   /**
-   * Verify signature and token fields
+   * Verify signature and token fields for an id_token
    *
    * @param {String} idToken
    * @param {String} clientID
    * @param {Function} done
    * @api protected
    */
-  public verifyGoogleToken(idToken: string, clientID: string | [], done: (...args: any[]) => void) {
+  public verifyGoogleIdToken(token: string, clientID: string | []) {
     this.googleAuthClient.verifyIdToken(
       {
         audience: this.audience,
-        idToken,
+        idToken: token,
       },
       (err, loginTicket) => {
         if (err) {
-          done(null, false, { message: err.message });
+          this.done(null, false, { message: err.message });
         } else if (loginTicket) {
           const payload = loginTicket.getPayload();
-          done(null, payload);
+          this.done(null, payload);
         } else {
-          done(null, false, { message: 'No login ticket retuned' });
+          this.done(null, false, { message: 'No login ticket retuned' });
         }
       },
     );
+  }
+
+  /**
+   * Ensure getting token info for access token is successful.
+   * 
+   * @param {String} accessToken
+   * @param {Function} done
+   * @api protected
+   */
+  public verifyGoogleAccessToken(accessToken: string) {
+    this.googleAuthClient.getTokenInfo(accessToken).then((tokenInfo) => {
+      if (!tokenInfo) {
+        this.done(null, false, {
+          message: 'invalid access token'
+        })
+
+        return
+      }
+
+      if (tokenInfo.expiry_date < Date.now()) {
+        this.done(null, false, {
+          message: 'access token expired'
+        })
+
+        return
+      }
+
+      this.done(null, tokenInfo)
+    }).catch((e) => {
+      this.done(null, false, {
+        message: e.message
+      })
+    })
   }
 
   /**
