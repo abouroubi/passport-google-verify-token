@@ -3,6 +3,7 @@
  */
 import { OAuth2Client } from 'google-auth-library';
 import { Strategy } from 'passport-strategy';
+import got from 'got'
 
 /**
  * `Strategy` constructor.
@@ -156,6 +157,7 @@ export class GoogleTokenStrategy extends Strategy {
   public verifyGoogleAccessToken(accessToken: string) {
     this.googleAuthClient.getTokenInfo(accessToken).then((tokenInfo) => {
       if (!tokenInfo) {
+        console.log('invalid access token')
         this.done(null, false, {
           message: 'invalid access token'
         })
@@ -164,6 +166,7 @@ export class GoogleTokenStrategy extends Strategy {
       }
 
       if (tokenInfo.expiry_date < Date.now()) {
+        console.log('token expired')
         this.done(null, false, {
           message: 'access token expired'
         })
@@ -171,8 +174,18 @@ export class GoogleTokenStrategy extends Strategy {
         return
       }
 
-      this.done(null, tokenInfo)
+      // Now we have to get the userinfo from the token
+      got.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`).then(userinfo => {
+        this.done(null, userinfo)
+      }).catch(e => {
+        console.log(e)
+        this.done(null, false, {
+          message: 'failed to get userinfo'
+        })
+      })
+
     }).catch((e) => {
+      console.log(e)
       this.done(null, false, {
         message: e.message
       })
