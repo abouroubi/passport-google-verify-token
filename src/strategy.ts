@@ -103,6 +103,7 @@ export class GoogleTokenStrategy extends Strategy {
    * Authenticate request by verifying the token
    *
    * @param {Object} req
+   * @param {Object} options
    * @api protected
    */
   public authenticate(req: any, options: any) {
@@ -125,7 +126,6 @@ export class GoogleTokenStrategy extends Strategy {
    *
    * @param {String} idToken
    * @param {String} clientID
-   * @param {Function} done
    * @api protected
    */
   public verifyGoogleIdToken(idToken: string, clientID: string | []) {
@@ -151,13 +151,11 @@ export class GoogleTokenStrategy extends Strategy {
    * Ensure getting token info for access token is successful.
    * 
    * @param {String} accessToken
-   * @param {Function} done
    * @api protected
    */
   public verifyGoogleAccessToken(accessToken: string) {
     this.googleAuthClient.getTokenInfo(accessToken).then((tokenInfo) => {
       if (!tokenInfo) {
-        console.log('invalid access token')
         this.done(null, false, {
           message: 'invalid access token'
         })
@@ -166,7 +164,6 @@ export class GoogleTokenStrategy extends Strategy {
       }
 
       if (tokenInfo.expiry_date < Date.now()) {
-        console.log('token expired')
         this.done(null, false, {
           message: 'access token expired'
         })
@@ -178,14 +175,11 @@ export class GoogleTokenStrategy extends Strategy {
       got.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`).then(userinfo => {
         this.done(null, userinfo)
       }).catch(e => {
-        console.log(e)
         this.done(null, false, {
           message: 'failed to get userinfo'
         })
       })
-
     }).catch((e) => {
-      console.log(e)
       this.done(null, false, {
         message: e.message
       })
