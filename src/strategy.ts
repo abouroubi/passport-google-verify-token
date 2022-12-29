@@ -128,11 +128,11 @@ export class GoogleTokenStrategy extends Strategy {
    * @param {Function} done
    * @api protected
    */
-  public verifyGoogleIdToken(token: string, clientID: string | []) {
+  public verifyGoogleIdToken(idToken: string, clientID: string | []) {
     this.googleAuthClient.verifyIdToken(
       {
         audience: this.audience,
-        idToken: token,
+        idToken,
       },
       (err, loginTicket) => {
         if (err) {
