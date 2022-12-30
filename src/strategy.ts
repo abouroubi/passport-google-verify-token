@@ -114,7 +114,7 @@ export class GoogleTokenStrategy extends Strategy {
       this.paramFromRequest(req, 'id_token') ||
       this.getBearerToken(req.headers);
 
-    if (idToken) this.verifyGoogleIdToken(idToken, this.clientID)
+    if (idToken) this.verifyGoogleIdToken(idToken)
     else if (accessToken) this.verifyGoogleAccessToken(accessToken)
     else {
       return this.fail({ message: 'no Google authentication token provided' }, 401);
@@ -128,7 +128,7 @@ export class GoogleTokenStrategy extends Strategy {
    * @param {String} clientID
    * @api protected
    */
-  public verifyGoogleIdToken(idToken: string, clientID: string | []) {
+  public verifyGoogleIdToken(idToken: string) {
     this.googleAuthClient.verifyIdToken(
       {
         audience: this.audience,

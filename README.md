@@ -23,7 +23,7 @@ unobtrusively integrated into any application or framework that supports
 ### Configure Strategy
 
 The Google authentication strategy leverages the [Google Auth Library for Node.js](https://github.com/googleapis/google-auth-library-nodejs) to authenticates users. 
-Applications must supply a `verify` callback which accepts the `idToken`
+Applications must supply a `verify` callback which accepts the `idToken` or `access_token`
 coming from the user to be authenticated, and then calls the `done` callback
 supplying a `parsedToken` (with all its information in visible form) and the
 `googleId`.
@@ -43,6 +43,9 @@ passport.use(new GoogleTokenStrategy({
     }
   ));
 ```
+When verifying an idToken, the Google Auth library `verifyIdToken()` function is called, and the authentication is finished. When an `access_token` is passed, however, two steps have to be made:
+1. The Google Auth `getTokenInfo()` function is called. This is to verify that the token is valid and not expired.
+2. A request to `/oauth2/v3/userinfo` is sent. `access_token`s require this second step in order to get the same user information `idToken`s return. 
 
 ### Authenticate Requests
 
