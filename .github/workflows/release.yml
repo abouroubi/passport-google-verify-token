@@ -6,6 +6,9 @@ name: Build, tag and release
 on:
   push:
     branches: [master]
+    
+env:
+  NODE_VERSION: 14.x
 
 jobs:
   test:
@@ -13,10 +16,10 @@ jobs:
     if: "!contains(github.event.head_commit.message, 'version bump to') || !contains(github.event.head_commit.message, 'skip ci')"
     steps:
     - uses: actions/checkout@v3
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v3
       with:
-        node-version: 12.x
+        node-version: ${{ env.NODE_VERSION }}
     - run: npm ci
     - run: npm run test
     - run: npm run build --if--present
@@ -30,11 +33,11 @@ jobs:
     outputs:
       tag: ${{ steps.tag_name.outputs.TAG }}
     steps:
-    - uses: actions/checkout@v2
-    - name: Use Node.js 12.x
-      uses: actions/setup-node@v1
+    - uses: actions/checkout@v3
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v3
       with:
-        node-version: 12.x
+        node-version: ${{ env.NODE_VERSION }}
     - run: npm ci
     - run: npm run build
     - name: Automated Version Bump
@@ -52,11 +55,11 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Use Node.js 12.x
-      uses: actions/setup-node@v1
+    - uses: actions/checkout@v3
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v3
       with:
-        node-version: 12.x
+        node-version: ${{ env.NODE_VERSION }}
     - name: GH Release
       uses: softprops/action-gh-release@v1
       with:
