@@ -3,6 +3,7 @@
  */
 import { OAuth2Client } from 'google-auth-library';
 import { Strategy } from 'passport-strategy';
+import got from 'got'
 
 /**
  * `Strategy` constructor.
@@ -67,59 +68,67 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   /**
+   * Internal function that handles successes/failures
+   * 
+   * @param {any} err 
+   * @param {any} parsedToken 
+   * @param {any?} info
+   */
+  private done(err: any, parsedToken: any, info?: any) {
+    if (err) {
+      return this.fail({ message: err.message }, 401);
+    }
+
+    if (!parsedToken) {
+      return this.fail(info);
+    }
+
+    const verified = (error: any, user: any, infoOnUser: any) => {
+      if (error) {
+        return this.error(error);
+      }
+      if (!user) {
+        return this.fail(infoOnUser);
+      }
+      this.success(user, infoOnUser);
+    };
+
+    if (parsedToken.sub) this.verify(parsedToken, parsedToken.sub, verified);
+    else {
+      this.verify(parsedToken, parsedToken, verified)
+    }
+  }
+
+  /**
    * Authenticate request by verifying the token
    *
    * @param {Object} req
+   * @param {Object} options
    * @api protected
    */
   public authenticate(req: any, options: any) {
     options = options || {};
 
+    const accessToken = this.paramFromRequest(req, 'access_token');
     const idToken =
       this.paramFromRequest(req, 'id_token') ||
-      this.paramFromRequest(req, 'access_token') ||
       this.getBearerToken(req.headers);
 
-    if (!idToken) {
-      return this.fail({ message: 'no ID token provided' }, 401);
+    if (idToken) this.verifyGoogleIdToken(idToken)
+    else if (accessToken) this.verifyGoogleAccessToken(accessToken)
+    else {
+      return this.fail({ message: 'no Google authentication token provided' }, 401);
     }
-
-    this.verifyGoogleToken(idToken, this.clientID, (err: any, parsedToken: any, info: any) => {
-      if (err) {
-        return this.fail({ message: err.message }, 401);
-      }
-
-      if (!parsedToken) {
-        return this.fail(info);
-      }
-
-      const verified = (error: any, user: any, infoOnUser: any) => {
-        if (error) {
-          return this.error(error);
-        }
-        if (!user) {
-          return this.fail(infoOnUser);
-        }
-        this.success(user, infoOnUser);
-      };
-
-      if (this.passReqToCallback) {
-        this.verify(req, parsedToken, parsedToken.sub, verified);
-      } else {
-        this.verify(parsedToken, parsedToken.sub, verified);
-      }
-    });
   }
 
   /**
-   * Verify signature and token fields
+   * Verify signature and token fields for an id_token
    *
    * @param {String} idToken
    * @param {String} clientID
-   * @param {Function} done
    * @api protected
    */
-  public verifyGoogleToken(idToken: string, clientID: string | [], done: (...args: any[]) => void) {
+  public verifyGoogleIdToken(idToken: string) {
     this.googleAuthClient.verifyIdToken(
       {
         audience: this.audience,
@@ -127,15 +136,54 @@ export class GoogleTokenStrategy extends Strategy {
       },
       (err, loginTicket) => {
         if (err) {
-          done(null, false, { message: err.message });
+          this.done(null, false, { message: err.message });
         } else if (loginTicket) {
           const payload = loginTicket.getPayload();
-          done(null, payload);
+          this.done(null, payload);
         } else {
-          done(null, false, { message: 'No login ticket retuned' });
+          this.done(null, false, { message: 'No login ticket retuned' });
         }
       },
     );
+  }
+
+  /**
+   * Ensure getting token info for access token is successful.
+   * 
+   * @param {String} accessToken
+   * @api protected
+   */
+  public verifyGoogleAccessToken(accessToken: string) {
+    this.googleAuthClient.getTokenInfo(accessToken).then((tokenInfo) => {
+      if (!tokenInfo) {
+        this.done(null, false, {
+          message: 'invalid access token'
+        })
+
+        return
+      }
+
+      if (tokenInfo.expiry_date < Date.now()) {
+        this.done(null, false, {
+          message: 'access token expired'
+        })
+
+        return
+      }
+
+      // Now we have to get the userinfo from the token
+      got.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`).then(userinfo => {
+        this.done(null, userinfo)
+      }).catch(e => {
+        this.done(null, false, {
+          message: 'failed to get userinfo'
+        })
+      })
+    }).catch((e) => {
+      this.done(null, false, {
+        message: e.message
+      })
+    })
   }
 
   /**
