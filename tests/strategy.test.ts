@@ -21,19 +21,6 @@ describe('Strategy', () => {
     return done(null, { id: '1234' }, { scope: 'read' });
   };
 
-  const mockVerifyGoogleTokenSuccess = (idToken: string, clientID: string | [], cb: (...args: any[]) => void) => {
-    const payload = { sub: 1 };
-    cb(null, payload);
-  };
-
-  const mockVerifyGoogleTokenNoParsedToken = (idToken: string, clientID: string | [], cb: (...args: any[]) => void) => {
-    cb(null, false, { message: 'Error message' });
-  };
-
-  const mockVerifyGoogleTokenError = (idToken: string, clientID: string | [], cb: (...args: any[]) => void) => {
-    cb({ message: 'Error message' });
-  };
-
   const mockToken = '123456790-POIHANPRI-KNJYHHKIIH';
 
   const strategy = new Strategy(
@@ -43,7 +30,10 @@ describe('Strategy', () => {
     verify,
   );
 
-  strategy.verifyGoogleToken = mockVerifyGoogleTokenSuccess;
+  strategy.verifyGoogleIdToken = (idToken: string) => {
+    const payload = { sub: 1 };
+    strategy.done(null, payload);
+  };
 
   const strategyWClientIDArray = new Strategy(
     {
@@ -52,7 +42,10 @@ describe('Strategy', () => {
     verify,
   );
 
-  strategyWClientIDArray.verifyGoogleToken = mockVerifyGoogleTokenSuccess;
+  strategyWClientIDArray.verifyGoogleIdToken = (idToken: string) => {
+    const payload = { sub: 1 };
+    strategy.done(null, payload);
+  };
 
   const strategyNoParsedToken = new Strategy(
     {
@@ -61,7 +54,9 @@ describe('Strategy', () => {
     verify,
   );
 
-  strategyNoParsedToken.verifyGoogleToken = mockVerifyGoogleTokenNoParsedToken;
+  strategyNoParsedToken.verifyGoogleIdToken = (idToken: string) => {
+    strategy.done(null, false, { message: 'Error message' });
+  };;
 
   const strategyTokenError = new Strategy(
     {
@@ -70,7 +65,9 @@ describe('Strategy', () => {
     verify,
   );
 
-  strategyTokenError.verifyGoogleToken = mockVerifyGoogleTokenError;
+  strategyTokenError.verifyGoogleIdToken = (idToken: string) => {
+    strategy.done({ message: 'Error message' });
+  };
 
   it('should be named google-verify-token', () => {
     expect(strategy.name).to.equal('google-verify-token');

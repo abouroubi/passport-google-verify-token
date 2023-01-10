@@ -71,10 +71,10 @@ export class GoogleTokenStrategy extends Strategy {
    * Internal function that handles successes/failures
    * 
    * @param {any} err 
-   * @param {any} parsedToken 
+   * @param {any?} parsedToken 
    * @param {any?} info
    */
-  private done(err: any, parsedToken: any, info?: any) {
+  public done(err: any, parsedToken?: any, info?: any) {
     if (err) {
       return this.fail({ message: err.message }, 401);
     }
