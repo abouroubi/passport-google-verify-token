@@ -1,9 +1,6 @@
-# passport-google-verify-token
+# @hatxor/passport-google-verify-token
 
-[![Build Status](https://dev.azure.com/abdouslayne/Personal%20Projects/_apis/build/status/passport-google-verify-token?branchName=master)](https://dev.azure.com/abdouslayne/Personal%20Projects/_build/latest?definitionId=2?branchName=master)
-[![npm version](https://badge.fury.io/js/passport-google-verify-token.svg)](https://badge.fury.io/js/passport-google-verify-token)
-![License](https://img.shields.io/npm/l/passport-facebook-token.svg)
-
+This project is a fork of [Abdou BOUROUBI](https://github.com/abouroubi)' [Passport Google Verify Token](https://github.com/abouroubi/passport-google-verify-token) as it seems abandoned. If Abdou' repository is ever reactivated, this will become obsolete.
 
 [Passport](http://passportjs.org/) strategy for authenticating with [Google](http://www.google.com/)
 access tokens using the OAuth 2.0 API.
@@ -16,7 +13,7 @@ unobtrusively integrated into any application or framework that supports
 
 ## Installation
 
-    $ npm install passport-google-verify-token
+    $ npm install @hatxor/passport-google-verify-token
 
 ## Usage
 
@@ -110,17 +107,19 @@ access_token=base64_access_token_string
 
 ## Credits
 
-  - [Abdou BOUROUBI](http://github.com/abouroubi)
+  - [Andrés Téllez](https://github.com/hatxor)
+  - [Abdou BOUROUBI](https://github.com/abouroubi)
+  - [Juanma Reyes](https://github.com/jmreyes)
 
 ## Thanks
 
-This project is inspired by [Juanma Reyes](http://github.com/jmreyes)' [Passport Google Id Token](https://github.com/jmreyes/passport-google-id-token).
+This project is forked from [Abdou BOUROUBI](https://github.com/abouroubi)' [Passport Google Verify Token](https://github.com/abouroubi/passport-google-verify-token) as it seems abandoned.
 
 ## License
 
 The MIT License (MIT)
 
-Copyright (c) 2018 Abdou Bouroubi
+Copyright (c) 2024 Andrés Téllez
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

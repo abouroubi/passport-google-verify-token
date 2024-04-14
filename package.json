@@ -1,6 +1,6 @@
 {
-  "name": "passport-google-verify-token",
-  "version": "3.0.0",
+  "name": "@hatxor/passport-google-verify-token",
+  "version": "1.0.0",
   "description": "Google Token strategy for Passport, let's you validate the user token server side, usefull for mobile app Google authentication for example. The validation is done by the official Google Auth library for NodeJs.",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -24,12 +24,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/abouroubi/passport-google-verify-token.git"
+    "url": "git+https://github.com/hatxor/passport-google-verify-token.git"
   },
-  "author": "Abdou BOUROUBI",
+  "author": "Andres Tellez",
+  "contributors": [
+    "Abdou BOUROUBI"
+  ],
   "license": "MIT",
   "dependencies": {
-    "google-auth-library": "^8.7.0",
+    "google-auth-library": "^9.7.0",
     "got": "11",
     "passport-strategy": "^1.0.0"
   },
