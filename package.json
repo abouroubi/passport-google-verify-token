@@ -30,7 +30,7 @@
   "license": "MIT",
   "dependencies": {
     "google-auth-library": "^8.7.0",
-    "got": "12",
+    "got": "^11.8.6",
     "passport-strategy": "^1.0.0"
   },
   "devDependencies": {
