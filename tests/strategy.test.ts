@@ -16,6 +16,49 @@ declare global {
   }
 }
 
+class SuccessStrategy extends Strategy {
+  private handler(token: string): void {
+    const payload = { sub: 1 };
+    this.done(null, payload);
+  }
+
+  public verifyGoogleIdToken(idToken: string): void {
+      this.handler(idToken);
+  }
+
+  public verifyGoogleAccessToken(accessToken: string): void {
+      this.handler(accessToken);
+  }
+}
+
+class ErrorStrategy extends Strategy {
+  private handler(token: string): void {
+    this.done({ message: 'Error message' });
+  }
+  
+  public verifyGoogleIdToken(idToken: string): void {
+      this.handler(idToken);
+  }
+  
+  public verifyGoogleAccessToken(accessToken: string): void {
+      this.handler(accessToken);
+  }
+}
+
+class NoParsedTokenStrategy extends Strategy {
+  private handler(token: string): void {
+    this.done(null, false, { message: 'Error message' });
+  }
+  
+  public verifyGoogleIdToken(idToken: string): void {
+      this.handler(idToken);
+  }
+  
+  public verifyGoogleAccessToken(accessToken: string): void {
+      this.handler(accessToken);
+  }
+}
+
 describe('Strategy', () => {
   const verify = (parsedToken: any, googleId: any, done: (...args: any[]) => void) => {
     return done(null, { id: '1234' }, { scope: 'read' });
@@ -23,51 +66,33 @@ describe('Strategy', () => {
 
   const mockToken = '123456790-POIHANPRI-KNJYHHKIIH';
 
-  const strategy = new Strategy(
+  const strategy = new SuccessStrategy(
     {
       clientID: 'DUMMY_CLIENT_ID',
     },
     verify,
   );
 
-  strategy.verifyGoogleIdToken = (idToken: string) => {
-    const payload = { sub: 1 };
-    strategy.done(null, payload);
-  };
-
-  const strategyWClientIDArray = new Strategy(
+  const strategyWClientIDArray = new SuccessStrategy(
     {
       clientID: ['DUMMY_CLIENT_ID_1', 'DUMMY_CLIENT_ID_2', 'DUMMY_CLIENT_ID', 'DUMMY_CLIENT_ID_3'],
     },
     verify,
   );
 
-  strategyWClientIDArray.verifyGoogleIdToken = (idToken: string) => {
-    const payload = { sub: 1 };
-    strategy.done(null, payload);
-  };
-
-  const strategyNoParsedToken = new Strategy(
+  const strategyNoParsedToken = new NoParsedTokenStrategy(
     {
       clientID: 'DUMMY_CLIENT_ID',
     },
     verify,
   );
 
-  strategyNoParsedToken.verifyGoogleIdToken = (idToken: string) => {
-    strategy.done(null, false, { message: 'Error message' });
-  };;
-
-  const strategyTokenError = new Strategy(
+  const strategyTokenError = new ErrorStrategy(
     {
       clientID: 'DUMMY_CLIENT_ID',
     },
     verify,
   );
-
-  strategyTokenError.verifyGoogleIdToken = (idToken: string) => {
-    strategy.done({ message: 'Error message' });
-  };
 
   it('should be named google-verify-token', () => {
     expect(strategy.name).to.equal('google-verify-token');
