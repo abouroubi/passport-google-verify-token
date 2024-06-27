@@ -8,16 +8,16 @@ on:
     branches: [master]
     
 env:
-  NODE_VERSION: 16.x
+  NODE_VERSION: 20.x
 
 jobs:
   test:
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, 'version bump to') || !contains(github.event.head_commit.message, 'skip ci')"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Use Node.js ${{ env.NODE_VERSION }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
     - run: npm ci
@@ -33,9 +33,9 @@ jobs:
     outputs:
       tag: ${{ steps.tag_name.outputs.TAG }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Use Node.js ${{ env.NODE_VERSION }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
     - run: npm ci
