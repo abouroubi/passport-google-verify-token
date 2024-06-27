@@ -109,10 +109,10 @@ export class GoogleTokenStrategy extends Strategy {
   public authenticate(req: any, options: any) {
     options = options || {};
 
-    const accessToken = this.paramFromRequest(req, 'access_token');
-    const idToken =
-      this.paramFromRequest(req, 'id_token') ||
+    const accessToken =
+      this.paramFromRequest(req, 'access_token') ||
       this.getBearerToken(req.headers);
+    const idToken = this.paramFromRequest(req, 'id_token');
 
     if (idToken) this.verifyGoogleIdToken(idToken)
     else if (accessToken) this.verifyGoogleAccessToken(accessToken)

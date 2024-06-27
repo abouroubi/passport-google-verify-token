@@ -31,6 +31,18 @@ class SuccessStrategy extends Strategy {
   }
 }
 
+class IdTokenSuccessStrategy extends SuccessStrategy {
+  public verifyGoogleAccessToken(accessToken: string): void {
+      throw new Error('The verifyGoogleAccessToken should not have been called.');
+  }
+}
+
+class AccessTokenSuccessStrategy extends SuccessStrategy {
+  public verifyGoogleIdToken(idToken: string): void {
+    throw new Error('The verifyGoogleIdToken should not have been called.');
+  }
+}
+
 class ErrorStrategy extends Strategy {
   private handler(token: string): void {
     this.done({ message: 'Error message' });
@@ -66,14 +78,21 @@ describe('Strategy', () => {
 
   const mockToken = '123456790-POIHANPRI-KNJYHHKIIH';
 
-  const strategy = new SuccessStrategy(
+  const idTokenStrategy = new IdTokenSuccessStrategy(
     {
       clientID: 'DUMMY_CLIENT_ID',
     },
     verify,
   );
 
-  const strategyWClientIDArray = new SuccessStrategy(
+  const accessTokenStrategy = new AccessTokenSuccessStrategy(
+    {
+      clientID: 'DUMMY_CLIENT_ID',
+    },
+    verify,
+  );
+
+  const strategyWClientIDArray = new AccessTokenSuccessStrategy(
     {
       clientID: ['DUMMY_CLIENT_ID_1', 'DUMMY_CLIENT_ID_2', 'DUMMY_CLIENT_ID', 'DUMMY_CLIENT_ID_3'],
     },
@@ -95,7 +114,7 @@ describe('Strategy', () => {
   );
 
   it('should be named google-verify-token', () => {
-    expect(strategy.name).to.equal('google-verify-token');
+    expect(idTokenStrategy.name).to.equal('google-verify-token');
   });
 
   it('should throw if constructed without a verify callback', () => {
@@ -132,31 +151,31 @@ describe('Strategy', () => {
   }
 
   describe('handling a request with id_token as query parameter', () => {
-    performValidTokenTest(strategy, (req: any) => {
+    performValidTokenTest(idTokenStrategy, (req: any) => {
       req.query = { id_token: mockToken };
     });
   });
 
   describe('handling a request with access_token as query parameter', () => {
-    performValidTokenTest(strategy, (req: any) => {
+    performValidTokenTest(accessTokenStrategy, (req: any) => {
       req.query = { access_token: mockToken };
     });
   });
 
   describe('handling a request with id_token as body parameter', () => {
-    performValidTokenTest(strategy, (req: any) => {
+    performValidTokenTest(idTokenStrategy, (req: any) => {
       req.body = { id_token: mockToken };
     });
   });
 
   describe('handling a request with access_token as body parameter', () => {
-    performValidTokenTest(strategy, (req: any) => {
+    performValidTokenTest(accessTokenStrategy, (req: any) => {
       req.body = { access_token: mockToken };
     });
   });
 
   describe('handling a request with bearer token in authorization header', () => {
-    performValidTokenTest(strategy, (req: any) => {
+    performValidTokenTest(accessTokenStrategy, (req: any) => {
       req.headers = { authorization: 'Bearer ' + mockToken };
     });
   });
@@ -188,7 +207,7 @@ describe('Strategy', () => {
   }
 
   describe('handling a request with no id token', () => {
-    performFailTokenTest(strategy, (req: any) => {
+    performFailTokenTest(idTokenStrategy, (req: any) => {
       return;
     });
   });
