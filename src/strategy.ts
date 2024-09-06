@@ -172,7 +172,7 @@ export class GoogleTokenStrategy extends Strategy {
       }
 
       // Now we have to get the userinfo from the token
-      got.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`).then(userinfo => {
+      got.get(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`).json().then(userinfo => {
         this.done(null, userinfo)
       }).catch(e => {
         this.done(null, false, {
