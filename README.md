@@ -16,13 +16,16 @@ unobtrusively integrated into any application or framework that supports
 
 ## Installation
 
-    $ npm install passport-google-verify-token
+  $ npm install passport-google-verify-token
+
+Requirements
+- Node.js 18+ (uses the built-in global fetch and current google-auth-library)
 
 ## Usage
 
 ### Configure Strategy
 
-The Google authentication strategy leverages the [Google Auth Library for Node.js](https://github.com/googleapis/google-auth-library-nodejs) to authenticates users. 
+The Google authentication strategy leverages the [Google Auth Library for Node.js](https://github.com/googleapis/google-auth-library-nodejs) to authenticate users. 
 Applications must supply a `verify` callback which accepts the `idToken` or `access_token`
 coming from the user to be authenticated, and then calls the `done` callback
 supplying a `parsedToken` (with all its information in visible form) and the
@@ -32,9 +35,9 @@ supplying a `parsedToken` (with all its information in visible form) and the
 var GoogleTokenStrategy = require("passport-google-verify-token").Strategy;
 
 passport.use(new GoogleTokenStrategy({
-      clientID: '12345.abcdefghijkl.apps.googleusercontent.com'// Specify the CLIENT_ID of the backend
-     // If other clients (such as android / ios apps) also access the google api:
-     // audience: [CLIENT_ID_FOR_THE_BACKEND, CLIENT_ID_ANDROID, CLIENT_ID_IOS, CLIENT_ID_SPA]
+  clientID: '12345.abcdefghijkl.apps.googleusercontent.com', // Backend CLIENT_ID
+  // If multiple clients (android/ios/web) access the backend, you can allow all of them:
+  // audience: [CLIENT_ID_FOR_BACKEND, CLIENT_ID_ANDROID, CLIENT_ID_IOS, CLIENT_ID_SPA],
     },
     function(parsedToken, googleId, done) {
       User.findOrCreate(..., function (err, user) {
@@ -42,10 +45,15 @@ passport.use(new GoogleTokenStrategy({
       });
     }
   ));
+
+// TypeScript usage
+// import { Strategy as GoogleTokenStrategy, GoogleTokenStrategyOptions } from 'passport-google-verify-token';
+// const opts: GoogleTokenStrategyOptions = { clientID: ['...'], audience: ['...'] };
+// passport.use(new GoogleTokenStrategy(opts, (parsedToken, googleId, done) => { /* ... */ }));
 ```
 When verifying an idToken, the Google Auth library `verifyIdToken()` function is called, and the authentication is finished. When an `access_token` is passed, however, two steps have to be made:
 1. The Google Auth `getTokenInfo()` function is called. This is to verify that the token is valid and not expired.
-2. A request to `/oauth2/v3/userinfo` is sent. `access_token`s require this second step in order to get the same user information `idToken`s return. 
+2. A request to `/oauth2/v3/userinfo` is sent with `Authorization: Bearer <token>`. `access_token`s require this second step in order to get the same user information `idToken`s return. 
 
 ### Authenticate Requests
 
@@ -77,7 +85,7 @@ module.exports = {
 
 ### Client Requests
 
-Clients can send requests to routes that use google-verify-token authentication using query parms, body, or HTTP headers. Clients will need to transmit the `access_token` or the `id_token` that are received from Google after user logs in.
+Clients can send requests to routes that use google-verify-token authentication using query params, body, or HTTP headers. Clients will need to transmit the `access_token` or the `id_token` that are received from Google after user logs in.
 
 #### Sending access_token as a Query parameter
 
@@ -87,7 +95,7 @@ GET /auth/google/token?access_token=<TOKEN_HERE>
 
 #### Sending access token as an HTTP header
 
-Clients can choose to send the access token using the Oauth2 Bearer token (RFC 6750) compliant format
+Clients can choose to send the access token using the OAuth2 Bearer token (RFC 6750) compliant format
 
 ```
 GET /resource HTTP/1.1

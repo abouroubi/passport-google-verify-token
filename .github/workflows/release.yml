@@ -22,7 +22,7 @@ jobs:
         node-version: ${{ env.NODE_VERSION }}
     - run: npm ci
     - run: npm run test
-    - run: npm run build --if--present
+    - run: npm run build --if-present
 
 
   build:
@@ -44,12 +44,11 @@ jobs:
       uses: phips28/gh-action-bump-version@master
     - name: Export TAG Parameter
       id: tag_name
-      run: |
-        echo ::set-output name=TAG::`cat package.json | jq -r .version`
+      run: echo "TAG=$(jq -r .version < package.json)" >> $GITHUB_OUTPUT
       shell: bash
 
 
-  realease:
+  release:
     needs: [build]
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
