@@ -45,7 +45,8 @@ class NoParsedTokenStrategy extends Strategy {
   }
 }
 
-const verify = (_parsedToken: unknown, _googleId: unknown, done: VerifyDone) => done(null, { id: '1234' }, { scope: 'read' });
+const verify = (_parsedToken: unknown, _googleId: unknown, done: VerifyDone) =>
+  done(null, { id: '1234' }, { scope: 'read' });
 const mockToken = '123456790-POIHANPRI-KNJYHHKIIH';
 const options = { clientID: 'DUMMY_CLIENT_ID' };
 

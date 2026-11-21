@@ -6,11 +6,7 @@ import { Strategy } from 'passport-strategy';
 
 export type VerifyDone = (error: Error | null, user?: unknown, info?: unknown) => void;
 export type ParsedToken = Record<string, unknown>;
-export type VerifyFunction = (
-  parsedToken: ParsedToken,
-  googleId: string | ParsedToken,
-  done: VerifyDone,
-) => void;
+export type VerifyFunction = (parsedToken: ParsedToken, googleId: string | ParsedToken, done: VerifyDone) => void;
 
 /**
  * Options accepted by GoogleTokenStrategy
@@ -74,7 +70,7 @@ export class GoogleTokenStrategy extends Strategy {
     super();
 
     let opts: GoogleTokenStrategyOptions | undefined;
-  if (typeof options === 'function') {
+    if (typeof options === 'function') {
       verify = options;
       opts = undefined;
     } else {
@@ -85,9 +81,9 @@ export class GoogleTokenStrategy extends Strategy {
       throw new Error('GoogleVerifyTokenStrategy requires a verify function');
     }
 
-  this.passReqToCallback = opts?.passReqToCallback;
+    this.passReqToCallback = opts?.passReqToCallback;
 
-  this.clientID = opts?.clientID;
+    this.clientID = opts?.clientID;
 
     this.name = 'google-verify-token';
     const oauthOptions: { clientId?: string } = {};
@@ -95,15 +91,15 @@ export class GoogleTokenStrategy extends Strategy {
       oauthOptions.clientId = this.clientID;
     }
     this.googleAuthClient = new OAuth2Client(oauthOptions);
-  this.verify = verify as VerifyFunction;
-  this.audience = opts?.audience ?? this.clientID;
+    this.verify = verify as VerifyFunction;
+    this.audience = opts?.audience ?? this.clientID;
   }
 
   /**
    * Internal function that handles successes/failures
-   * 
-   * @param {any} err 
-   * @param {any?} parsedToken 
+   *
+   * @param {any} err
+   * @param {any?} parsedToken
    * @param {any?} info
    */
   public done(err: any, parsedToken?: any, info?: any) {
@@ -127,7 +123,7 @@ export class GoogleTokenStrategy extends Strategy {
 
     if (parsedToken.sub) this.verify(parsedToken, parsedToken.sub, verified);
     else {
-      this.verify(parsedToken, parsedToken, verified)
+      this.verify(parsedToken, parsedToken, verified);
     }
   }
 
@@ -141,13 +137,11 @@ export class GoogleTokenStrategy extends Strategy {
   public authenticate(req: any, _options?: any) {
     // options currently unused but kept for API symmetry with passport strategies
 
-    const accessToken =
-      this.paramFromRequest(req, 'access_token') ||
-      this.getBearerToken(req.headers);
+    const accessToken = this.paramFromRequest(req, 'access_token') || this.getBearerToken(req.headers);
     const idToken = this.paramFromRequest(req, 'id_token');
 
-    if (idToken) this.verifyGoogleIdToken(idToken)
-    else if (accessToken) this.verifyGoogleAccessToken(accessToken)
+    if (idToken) this.verifyGoogleIdToken(idToken);
+    else if (accessToken) this.verifyGoogleAccessToken(accessToken);
     else {
       return this.fail({ message: 'no Google authentication token provided' }, 401);
     }
@@ -205,7 +199,7 @@ export class GoogleTokenStrategy extends Strategy {
           }
           const userinfo = await resp.json();
           this.done(null, userinfo);
-    } catch {
+        } catch {
           this.done(null, false, { message: 'failed to get userinfo' });
         }
       } catch (e: any) {
