@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
+import { GaxiosError } from 'gaxios';
 import { OAuth2Client } from 'google-auth-library';
 import { Strategy } from 'passport-strategy';
 
@@ -20,7 +21,8 @@ export interface TokenRequest {
  * or the Google userinfo profile of an access token.
  */
 export interface ParsedToken {
-  sub?: string;
+  /** The Google account's unique, stable user id. */
+  sub: string;
   email?: string;
   email_verified?: boolean;
   name?: string;
@@ -33,7 +35,7 @@ export interface ParsedToken {
 }
 
 export type VerifyDone = (error: Error | null, user?: unknown, info?: unknown) => void;
-export type VerifyFunction = (parsedToken: ParsedToken, googleId: string | ParsedToken, done: VerifyDone) => void;
+export type VerifyFunction = (parsedToken: ParsedToken, googleId: string, done: VerifyDone) => void;
 
 export interface GoogleTokenStrategyOptions {
   /** The OAuth client ID of your app, or several (e.g. web, Android and iOS). */
@@ -48,6 +50,11 @@ type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; me
 /**
  * Passport strategy that authenticates requests carrying a Google id token or
  * access token, verified server side with the official Google Auth Library.
+ *
+ * A token that is missing or that Google rejects fails authentication (401).
+ * When Google itself cannot be reached or answers with a server error, the
+ * strategy reports an error instead, so an outage is never mistaken for a
+ * bad token.
  *
  * @example
  * passport.use(new GoogleTokenStrategy(
@@ -120,7 +127,7 @@ export class GoogleTokenStrategy extends Strategy {
     }
 
     const { parsedToken } = check;
-    this.verify(parsedToken, parsedToken.sub ?? parsedToken, (error, user, info) => {
+    this.verify(parsedToken, parsedToken.sub, (error, user, info) => {
       if (error) {
         this.error(error);
       } else if (!user) {
@@ -132,15 +139,19 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   private async checkIdToken(idToken: string): Promise<TokenCheck> {
+    let payload: unknown;
     try {
       const ticket = await this.googleAuthClient.verifyIdToken({ idToken, audience: [...this.audience] });
-      const payload = ticket.getPayload();
-      return payload
-        ? { valid: true, parsedToken: { ...payload } }
-        : { valid: false, message: 'No login ticket returned' };
+      payload = ticket.getPayload();
     } catch (err) {
+      // The only HTTP request verifyIdToken() makes is for Google's signing certificates;
+      // every other error it throws is about the token itself.
+      if (err instanceof GaxiosError) {
+        throw new Error('Could not fetch Google signing certificates', { cause: err });
+      }
       return { valid: false, message: errorMessage(err, 'Failed to verify id token') };
     }
+    return toTokenCheck(payload);
   }
 
   private async checkAccessToken(accessToken: string): Promise<TokenCheck> {
@@ -148,24 +159,34 @@ export class GoogleTokenStrategy extends Strategy {
     try {
       tokenAudience = (await this.googleAuthClient.getTokenInfo(accessToken)).aud;
     } catch (err) {
-      return { valid: false, message: errorMessage(err, 'failed to verify access token') };
+      if (isTokenRejection(err)) {
+        return { valid: false, message: 'invalid access token' };
+      }
+      throw new Error('Could not verify the access token with Google', { cause: err });
     }
     if (!this.audience.includes(tokenAudience)) {
       return { valid: false, message: 'access token was not issued to an allowed audience' };
     }
 
+    let response: Response;
     try {
-      const response = await fetch(USER_INFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } });
-      if (!response.ok) {
-        return { valid: false, message: 'failed to get userinfo' };
-      }
-      const profile: unknown = await response.json();
-      return isParsedToken(profile)
-        ? { valid: true, parsedToken: profile }
-        : { valid: false, message: 'failed to get userinfo' };
-    } catch {
+      response = await fetch(USER_INFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } });
+    } catch (err) {
+      throw new Error('Could not reach the Google userinfo endpoint', { cause: err });
+    }
+    if (response.status === 401 || response.status === 403) {
       return { valid: false, message: 'failed to get userinfo' };
     }
+    if (!response.ok) {
+      throw new Error(`Google userinfo endpoint responded with HTTP ${response.status}`);
+    }
+    let profile: unknown;
+    try {
+      profile = await response.json();
+    } catch (err) {
+      throw new Error('Google userinfo endpoint returned invalid JSON', { cause: err });
+    }
+    return toTokenCheck(profile);
   }
 }
 
@@ -190,13 +211,22 @@ function readBearerToken(headers: IncomingHttpHeaders): string | undefined {
   return parts?.length === 2 && parts[0] === 'Bearer' && parts[1] !== '' ? parts[1] : undefined;
 }
 
+function toTokenCheck(claims: unknown): TokenCheck {
+  return isParsedToken(claims)
+    ? { valid: true, parsedToken: { ...claims } }
+    : { valid: false, message: 'token does not identify a Google account' };
+}
+
 function isParsedToken(value: unknown): value is ParsedToken {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    ['string', 'undefined'].includes(typeof Reflect.get(value, 'sub'))
-  );
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const sub: unknown = Reflect.get(value, 'sub');
+  return typeof sub === 'string' && sub !== '';
+}
+
+function isTokenRejection(err: unknown): boolean {
+  return err instanceof GaxiosError && (err.status === 400 || err.status === 401);
 }
 
 function toError(err: unknown): Error {

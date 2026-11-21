@@ -2,9 +2,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { Strategy } from '../src';
 import type { GoogleTokenStrategyOptions, VerifyDone, VerifyFunction } from '../src';
 import {
+  CERTS_URL,
   CLIENT_ID,
   GOOGLE_USER_ID,
   OTHER_CLIENT_ID,
+  TOKEN_INFO_URL,
   USER_INFO_URL,
   googleServer,
   http,
@@ -238,17 +240,122 @@ describe('GoogleTokenStrategy', () => {
       const { strategy, verify } = createStrategy();
       const outcome = await runStrategy(strategy, { headers: {}, body: { access_token: 'ya29.revoked' } });
 
-      expect(outcome).toMatchObject({ kind: 'fail', challenge: { message: expect.any(String) } });
+      expect(outcome).toEqual({ kind: 'fail', challenge: { message: 'invalid access token' }, status: 401 });
       expect(verify).not.toHaveBeenCalled();
     });
 
-    it('fails without calling verify when Google rejects the token at the userinfo endpoint', async () => {
-      googleServer.use(http.get(USER_INFO_URL, () => HttpResponse.json({ error: 'invalid_token' }, { status: 401 })));
+    it.each([401, 403])('fails without calling verify when the userinfo endpoint answers %i', async (status) => {
+      googleServer.use(http.get(USER_INFO_URL, () => HttpResponse.json({ error: 'invalid_token' }, { status })));
       const { strategy, verify } = createStrategy();
       const outcome = await runStrategy(strategy, { headers: {}, body: { access_token: issueAccessToken() } });
 
       expect(outcome).toMatchObject({ kind: 'fail', challenge: { message: 'failed to get userinfo' } });
       expect(verify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tokens that do not identify a Google account', () => {
+    it.each([
+      { problem: 'has no subject', claims: { sub: undefined } },
+      { problem: 'has an empty subject', claims: { sub: '' } },
+      { problem: 'has a non-string subject', claims: { sub: 42 } },
+    ])('fails without calling verify when the id token $problem', async ({ claims }) => {
+      const { strategy, verify } = createStrategy();
+      const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: signIdToken(claims) } });
+
+      expect(outcome).toEqual({
+        kind: 'fail',
+        challenge: { message: 'token does not identify a Google account' },
+        status: 401,
+      });
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { body: 'null', profile: null },
+      { body: 'an array', profile: [{ sub: GOOGLE_USER_ID }] },
+      { body: 'a string', profile: GOOGLE_USER_ID },
+    ])('fails without calling verify when the userinfo body is $body', async ({ profile }) => {
+      googleServer.use(http.get(USER_INFO_URL, () => HttpResponse.json(profile)));
+      const { strategy, verify } = createStrategy();
+      const outcome = await runStrategy(strategy, { headers: {}, body: { access_token: issueAccessToken() } });
+
+      expect(outcome).toMatchObject({
+        kind: 'fail',
+        challenge: { message: 'token does not identify a Google account' },
+      });
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it('fails without calling verify when the userinfo profile has no subject', async () => {
+      const { strategy, verify } = createStrategy();
+      const token = issueAccessToken({ userInfo: { sub: undefined } });
+      const outcome = await runStrategy(strategy, { headers: {}, body: { access_token: token } });
+
+      expect(outcome).toMatchObject({
+        kind: 'fail',
+        challenge: { message: 'token does not identify a Google account' },
+      });
+      expect(verify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('when Google is unavailable', () => {
+    const serverError = () => HttpResponse.json({ error: 'backendError' }, { status: 503 });
+    const networkError = () => HttpResponse.error();
+
+    async function expectErrorWithoutVerify(req: Parameters<typeof runStrategy>[1], message: string | RegExp) {
+      const { strategy, verify } = createStrategy();
+      const outcome = await runStrategy(strategy, req);
+
+      expect(outcome.kind).toBe('error');
+      expect(outcome.kind === 'error' && outcome.error).toBeInstanceOf(Error);
+      expect(outcome.kind === 'error' && (outcome.error as Error).message).toMatch(message);
+      expect(verify).not.toHaveBeenCalled();
+    }
+
+    it.each([
+      { failure: 'a server error', respond: serverError },
+      { failure: 'a network error', respond: networkError },
+    ])('reports an error, not a failure, when the signing certificates fetch hits $failure', async ({ respond }) => {
+      googleServer.use(http.get(CERTS_URL, respond));
+      await expectErrorWithoutVerify(
+        { headers: {}, body: { id_token: signIdToken() } },
+        'Could not fetch Google signing certificates',
+      );
+    });
+
+    it.each([
+      { failure: 'a server error', respond: serverError },
+      { failure: 'a network error', respond: networkError },
+    ])('reports an error, not a failure, when tokeninfo hits $failure', async ({ respond }) => {
+      googleServer.use(http.post(TOKEN_INFO_URL, respond));
+      await expectErrorWithoutVerify(
+        { headers: {}, body: { access_token: issueAccessToken() } },
+        'Could not verify the access token with Google',
+      );
+    });
+
+    it.each([
+      { failure: 'a server error', respond: serverError, message: 'Google userinfo endpoint responded with HTTP 503' },
+      { failure: 'a network error', respond: networkError, message: 'Could not reach the Google userinfo endpoint' },
+    ])('reports an error, not a failure, when userinfo hits $failure', async ({ respond, message }) => {
+      googleServer.use(http.get(USER_INFO_URL, respond));
+      await expectErrorWithoutVerify({ headers: {}, body: { access_token: issueAccessToken() } }, message);
+    });
+
+    it('reports an error when userinfo answers with a body that is not JSON', async () => {
+      googleServer.use(http.get(USER_INFO_URL, () => HttpResponse.text('<html>maintenance</html>')));
+      await expectErrorWithoutVerify(
+        { headers: {}, body: { access_token: issueAccessToken() } },
+        'Google userinfo endpoint returned invalid JSON',
+      );
+    });
+
+    it('keeps the underlying error as the cause', async () => {
+      googleServer.use(http.get(CERTS_URL, networkError));
+      const outcome = await runStrategy(createStrategy().strategy, { headers: {}, body: { id_token: signIdToken() } });
+      expect(outcome.kind === 'error' && (outcome.error as Error).cause).toBeInstanceOf(Error);
     });
   });
 
