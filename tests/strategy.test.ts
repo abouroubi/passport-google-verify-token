@@ -36,9 +36,38 @@ describe('GoogleTokenStrategy', () => {
 
     it('throws when no verify callback is given', () => {
       // @ts-expect-error -- JavaScript callers can omit the callback
-      expect(() => new Strategy({ clientID: CLIENT_ID })).toThrow(
-        'GoogleVerifyTokenStrategy requires a verify function',
+      expect(() => new Strategy({ clientID: CLIENT_ID })).toThrow('GoogleTokenStrategy requires a verify function');
+    });
+
+    it('throws when called with only a verify callback', () => {
+      // @ts-expect-error -- the options-less signature was removed; JavaScript callers can still use it
+      expect(() => new Strategy(acceptingVerify())).toThrow(
+        'GoogleTokenStrategy requires an options object with a clientID',
       );
+    });
+
+    it.each([
+      { problem: 'missing', clientID: undefined },
+      { problem: 'an empty string', clientID: '' },
+      { problem: 'an empty array', clientID: [] },
+      { problem: 'an array of empty strings', clientID: ['', ''] },
+    ])('throws when clientID is $problem', ({ clientID }) => {
+      // @ts-expect-error -- JavaScript callers, or an unset environment variable, can pass anything here
+      expect(() => new Strategy({ clientID }, acceptingVerify())).toThrow('GoogleTokenStrategy requires a clientID');
+    });
+
+    it('throws when audience is explicitly empty', () => {
+      expect(() => new Strategy({ clientID: CLIENT_ID, audience: [] }, acceptingVerify())).toThrow(
+        'GoogleTokenStrategy requires a non-empty audience',
+      );
+    });
+
+    it('exposes the accepted audiences as a list', () => {
+      expect(createStrategy().strategy.audience).toEqual([CLIENT_ID]);
+      expect(createStrategy({ audience: [OTHER_CLIENT_ID, CLIENT_ID] }).strategy.audience).toEqual([
+        OTHER_CLIENT_ID,
+        CLIENT_ID,
+      ]);
     });
   });
 
@@ -164,6 +193,38 @@ describe('GoogleTokenStrategy', () => {
     ])('reads the token from the $source', async ({ req }) => {
       const outcome = await runStrategy(createStrategy().strategy, req(issueAccessToken()));
       expect(outcome.kind).toBe('success');
+    });
+
+    it('fails without calling verify when the token was issued to another application', async () => {
+      const { strategy, verify } = createStrategy();
+      const token = issueAccessToken({ tokenInfo: { aud: OTHER_CLIENT_ID, azp: OTHER_CLIENT_ID } });
+      const outcome = await runStrategy(strategy, { headers: {}, body: { access_token: token } });
+
+      expect(outcome).toEqual({
+        kind: 'fail',
+        challenge: { message: 'access token was not issued to an allowed audience' },
+        status: 401,
+      });
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it('accepts a token issued to any client ID in the clientID array', async () => {
+      const { strategy } = createStrategy({ clientID: [OTHER_CLIENT_ID, CLIENT_ID] });
+      const token = issueAccessToken({ tokenInfo: { aud: OTHER_CLIENT_ID } });
+      const outcome = await runStrategy(strategy, { headers: {}, body: { access_token: token } });
+      expect(outcome.kind).toBe('success');
+    });
+
+    it('checks the token against `audience` instead of `clientID` when both are set', async () => {
+      const { strategy } = createStrategy({ clientID: CLIENT_ID, audience: OTHER_CLIENT_ID });
+      const accepted = await runStrategy(strategy, {
+        headers: {},
+        body: { access_token: issueAccessToken({ tokenInfo: { aud: OTHER_CLIENT_ID } }) },
+      });
+      const rejected = await runStrategy(strategy, { headers: {}, body: { access_token: issueAccessToken() } });
+
+      expect(accepted.kind).toBe('success');
+      expect(rejected.kind).toBe('fail');
     });
 
     it('ignores authorization headers that are not Bearer credentials', async () => {

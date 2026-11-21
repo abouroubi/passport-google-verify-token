@@ -38,7 +38,7 @@ export type VerifyFunction = (parsedToken: ParsedToken, googleId: string | Parse
 export interface GoogleTokenStrategyOptions {
   /** The OAuth client ID of your app, or several (e.g. web, Android and iOS). */
   clientID: string | string[];
-  /** Acceptable token audiences. Defaults to `clientID`. */
+  /** Acceptable token audiences, for both id and access tokens. Defaults to `clientID`. */
   audience?: string | string[];
   passReqToCallback?: boolean;
 }
@@ -60,27 +60,37 @@ type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; me
 export class GoogleTokenStrategy extends Strategy {
   public name = 'google-verify-token';
   public readonly googleAuthClient: OAuth2Client;
-  public readonly clientID: string | string[] | undefined;
-  public readonly audience: string | string[] | undefined;
+  public readonly clientID: string | string[];
+  public readonly audience: readonly string[];
   public readonly passReqToCallback: boolean | undefined;
   private readonly verify: VerifyFunction;
 
-  constructor(verify: VerifyFunction);
-  constructor(options: GoogleTokenStrategyOptions, verify: VerifyFunction);
-  constructor(optionsOrVerify: GoogleTokenStrategyOptions | VerifyFunction, verify?: VerifyFunction) {
+  constructor(options: GoogleTokenStrategyOptions, verify: VerifyFunction) {
     super();
 
-    const options = typeof optionsOrVerify === 'function' ? undefined : optionsOrVerify;
-    const verifyCallback = typeof optionsOrVerify === 'function' ? optionsOrVerify : verify;
-    if (!verifyCallback) {
-      throw new Error('GoogleVerifyTokenStrategy requires a verify function');
+    if (typeof options !== 'object' || options === null) {
+      throw new Error('GoogleTokenStrategy requires an options object with a clientID');
+    }
+    if (typeof verify !== 'function') {
+      throw new Error('GoogleTokenStrategy requires a verify function');
+    }
+    // Without an audience Google accepts tokens minted for any application, which
+    // would let another app's users sign in here with their own tokens.
+    if (toList(options.clientID).length === 0) {
+      throw new Error('GoogleTokenStrategy requires a clientID');
+    }
+    const audience = toList(options.audience ?? options.clientID);
+    if (audience.length === 0) {
+      throw new Error('GoogleTokenStrategy requires a non-empty audience');
     }
 
-    this.verify = verifyCallback;
-    this.clientID = options?.clientID;
-    this.audience = options?.audience ?? this.clientID;
-    this.passReqToCallback = options?.passReqToCallback;
-    this.googleAuthClient = new OAuth2Client(typeof this.clientID === 'string' ? { clientId: this.clientID } : {});
+    this.verify = verify;
+    this.clientID = options.clientID;
+    this.audience = audience;
+    this.passReqToCallback = options.passReqToCallback;
+    this.googleAuthClient = new OAuth2Client(
+      typeof options.clientID === 'string' ? { clientId: options.clientID } : {},
+    );
   }
 
   public authenticate(req: TokenRequest): void {
@@ -123,7 +133,7 @@ export class GoogleTokenStrategy extends Strategy {
 
   private async checkIdToken(idToken: string): Promise<TokenCheck> {
     try {
-      const ticket = await this.googleAuthClient.verifyIdToken({ idToken, audience: this.audience });
+      const ticket = await this.googleAuthClient.verifyIdToken({ idToken, audience: [...this.audience] });
       const payload = ticket.getPayload();
       return payload
         ? { valid: true, parsedToken: { ...payload } }
@@ -134,10 +144,14 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   private async checkAccessToken(accessToken: string): Promise<TokenCheck> {
+    let tokenAudience: string;
     try {
-      await this.googleAuthClient.getTokenInfo(accessToken);
+      tokenAudience = (await this.googleAuthClient.getTokenInfo(accessToken)).aud;
     } catch (err) {
       return { valid: false, message: errorMessage(err, 'failed to verify access token') };
+    }
+    if (!this.audience.includes(tokenAudience)) {
+      return { valid: false, message: 'access token was not issued to an allowed audience' };
     }
 
     try {
@@ -164,6 +178,11 @@ function readTokenParam(req: TokenRequest, name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+function toList(value: string | string[] | undefined): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.filter((item): item is string => typeof item === 'string' && item !== '');
 }
 
 function readBearerToken(headers: IncomingHttpHeaders): string | undefined {
