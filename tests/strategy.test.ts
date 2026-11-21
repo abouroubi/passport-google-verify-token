@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Strategy } from '../src';
-import type { GoogleTokenStrategyOptions, VerifyDone, VerifyFunction } from '../src';
+import type { GoogleTokenStrategyOptions, VerifyDone, VerifyFunction, VerifyFunctionWithRequest } from '../src';
 import {
   CERTS_URL,
   CLIENT_ID,
@@ -356,6 +356,45 @@ describe('GoogleTokenStrategy', () => {
       googleServer.use(http.get(CERTS_URL, networkError));
       const outcome = await runStrategy(createStrategy().strategy, { headers: {}, body: { id_token: signIdToken() } });
       expect(outcome.kind === 'error' && (outcome.error as Error).cause).toBeInstanceOf(Error);
+    });
+  });
+
+  describe('passReqToCallback', () => {
+    it.each([
+      { token: 'id token', body: () => ({ id_token: signIdToken() }) },
+      { token: 'access token', body: () => ({ access_token: issueAccessToken() }) },
+    ])('passes the request to the verify callback as its first argument ($token)', async ({ body }) => {
+      const verify = vi.fn<VerifyFunctionWithRequest>((_req, _parsedToken, _googleId, done) => done(null, USER));
+      const strategy = new Strategy({ clientID: CLIENT_ID, passReqToCallback: true }, verify);
+      const req = { headers: { 'x-tenant': 'acme' }, body: body() };
+
+      const outcome = await runStrategy(strategy, req);
+
+      expect(outcome).toMatchObject({ kind: 'success', user: USER });
+      const [receivedReq, parsedToken, googleId] = verify.mock.calls[0];
+      expect(receivedReq).toBe(req);
+      expect(parsedToken).toMatchObject({ sub: GOOGLE_USER_ID });
+      expect(googleId).toBe(GOOGLE_USER_ID);
+    });
+
+    it.each([{ passReqToCallback: false as const }, {}])(
+      'does not pass the request when passReqToCallback is %o',
+      async (options) => {
+        const { strategy, verify } = createStrategy(options);
+        await runStrategy(strategy, { headers: {}, body: { id_token: signIdToken() } });
+
+        expect(verify.mock.calls[0]).toHaveLength(3);
+        expect(verify.mock.calls[0][0]).toMatchObject({ sub: GOOGLE_USER_ID });
+      },
+    );
+
+    it('reports whether the request is passed', () => {
+      const withRequest = new Strategy(
+        { clientID: CLIENT_ID, passReqToCallback: true },
+        vi.fn<VerifyFunctionWithRequest>(),
+      );
+      expect(withRequest.passReqToCallback).toBe(true);
+      expect(createStrategy().strategy.passReqToCallback).toBe(false);
     });
   });
 

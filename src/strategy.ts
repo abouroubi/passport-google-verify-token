@@ -36,14 +36,32 @@ export interface ParsedToken {
 
 export type VerifyDone = (error: Error | null, user?: unknown, info?: unknown) => void;
 export type VerifyFunction = (parsedToken: ParsedToken, googleId: string, done: VerifyDone) => void;
+export type VerifyFunctionWithRequest = (
+  req: TokenRequest,
+  parsedToken: ParsedToken,
+  googleId: string,
+  done: VerifyDone,
+) => void;
 
-export interface GoogleTokenStrategyOptions {
+interface CommonOptions {
   /** The OAuth client ID of your app, or several (e.g. web, Android and iOS). */
   clientID: string | string[];
   /** Acceptable token audiences, for both id and access tokens. Defaults to `clientID`. */
   audience?: string | string[];
-  passReqToCallback?: boolean;
 }
+
+export interface GoogleTokenStrategyOptions extends CommonOptions {
+  passReqToCallback?: false;
+}
+
+export interface GoogleTokenStrategyOptionsWithRequest extends CommonOptions {
+  /** Pass the request to the verify callback as its first argument. */
+  passReqToCallback: true;
+}
+
+type StrategyArguments =
+  | [options: GoogleTokenStrategyOptions, verify: VerifyFunction]
+  | [options: GoogleTokenStrategyOptionsWithRequest, verify: VerifyFunctionWithRequest];
 
 type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; message: string };
 
@@ -69,12 +87,15 @@ export class GoogleTokenStrategy extends Strategy {
   public readonly googleAuthClient: OAuth2Client;
   public readonly clientID: string | string[];
   public readonly audience: readonly string[];
-  public readonly passReqToCallback: boolean | undefined;
-  private readonly verify: VerifyFunction;
+  public readonly passReqToCallback: boolean;
+  private readonly verify: VerifyFunctionWithRequest;
 
-  constructor(options: GoogleTokenStrategyOptions, verify: VerifyFunction) {
+  constructor(options: GoogleTokenStrategyOptions, verify: VerifyFunction);
+  constructor(options: GoogleTokenStrategyOptionsWithRequest, verify: VerifyFunctionWithRequest);
+  constructor(...args: StrategyArguments) {
     super();
 
+    const [options, verify] = args;
     if (typeof options !== 'object' || options === null) {
       throw new Error('GoogleTokenStrategy requires an options object with a clientID');
     }
@@ -91,10 +112,15 @@ export class GoogleTokenStrategy extends Strategy {
       throw new Error('GoogleTokenStrategy requires a non-empty audience');
     }
 
-    this.verify = verify;
+    if (passesRequest(args)) {
+      this.verify = args[1];
+    } else {
+      const verifyWithoutRequest = args[1];
+      this.verify = (_req, parsedToken, googleId, done) => verifyWithoutRequest(parsedToken, googleId, done);
+    }
+    this.passReqToCallback = options.passReqToCallback === true;
     this.clientID = options.clientID;
     this.audience = audience;
-    this.passReqToCallback = options.passReqToCallback;
     this.googleAuthClient = new OAuth2Client(
       typeof options.clientID === 'string' ? { clientId: options.clientID } : {},
     );
@@ -127,7 +153,7 @@ export class GoogleTokenStrategy extends Strategy {
     }
 
     const { parsedToken } = check;
-    this.verify(parsedToken, parsedToken.sub, (error, user, info) => {
+    this.verify(req, parsedToken, parsedToken.sub, (error, user, info) => {
       if (error) {
         this.error(error);
       } else if (!user) {
@@ -199,6 +225,12 @@ function readTokenParam(req: TokenRequest, name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+function passesRequest(
+  args: StrategyArguments,
+): args is [GoogleTokenStrategyOptionsWithRequest, VerifyFunctionWithRequest] {
+  return args[0].passReqToCallback === true;
 }
 
 function toList(value: string | string[] | undefined): string[] {
