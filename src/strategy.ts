@@ -63,6 +63,7 @@ type StrategyArguments =
   | [options: GoogleTokenStrategyOptions, verify: VerifyFunction]
   | [options: GoogleTokenStrategyOptionsWithRequest, verify: VerifyFunctionWithRequest];
 
+type ExtractedToken = { kind: 'id' | 'access'; token: string };
 type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; message: string };
 
 /**
@@ -134,18 +135,14 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   private async authenticateRequest(req: TokenRequest): Promise<void> {
-    const idToken = readTokenParam(req, 'id_token');
-    const accessToken = readTokenParam(req, 'access_token') ?? readBearerToken(req.headers);
-
-    let check: TokenCheck;
-    if (idToken) {
-      check = await this.checkIdToken(idToken);
-    } else if (accessToken) {
-      check = await this.checkAccessToken(accessToken);
-    } else {
+    const extracted = extractToken(req);
+    if (!extracted) {
       this.fail({ message: 'no Google authentication token provided' }, 401);
       return;
     }
+
+    const check =
+      extracted.kind === 'id' ? await this.checkIdToken(extracted.token) : await this.checkAccessToken(extracted.token);
 
     if (!check.valid) {
       this.fail({ message: check.message }, 401);
@@ -216,15 +213,43 @@ export class GoogleTokenStrategy extends Strategy {
   }
 }
 
+/**
+ * Finds the token to verify, in order of precedence:
+ * 1. `id_token` in the body, query string, headers or route params;
+ * 2. `credential` in the body, the field Google Identity Services posts the id token in;
+ * 3. `access_token` in the body, query string, headers or route params;
+ * 4. an `Authorization: Bearer` header, holding either kind of token.
+ */
+function extractToken(req: TokenRequest): ExtractedToken | undefined {
+  const idToken = readTokenParam(req, 'id_token') ?? readField(req.body, 'credential');
+  if (idToken) {
+    return { kind: 'id', token: idToken };
+  }
+  const accessToken = readTokenParam(req, 'access_token');
+  if (accessToken) {
+    return { kind: 'access', token: accessToken };
+  }
+  const bearerToken = readBearerToken(req.headers);
+  if (bearerToken) {
+    return { kind: looksLikeJwt(bearerToken) ? 'id' : 'access', token: bearerToken };
+  }
+  return undefined;
+}
+
 /** Reads a non-empty string token from the body, query string, headers or route params, in that order. */
 function readTokenParam(req: TokenRequest, name: string): string | undefined {
   for (const source of [req.body, req.query, req.headers, req.params]) {
-    const value = source?.[name];
-    if (typeof value === 'string' && value !== '') {
+    const value = readField(source, name);
+    if (value) {
       return value;
     }
   }
   return undefined;
+}
+
+function readField(source: Record<string, unknown> | null | undefined, name: string): string | undefined {
+  const value = source?.[name];
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 function passesRequest(
@@ -238,9 +263,17 @@ function toList(value: string | string[] | undefined): string[] {
   return values.filter((item): item is string => typeof item === 'string' && item !== '');
 }
 
+/** The auth scheme is case-insensitive (RFC 9110 §11.1). */
 function readBearerToken(headers: IncomingHttpHeaders): string | undefined {
-  const parts = headers.authorization?.split(' ');
-  return parts?.length === 2 && parts[0] === 'Bearer' && parts[1] !== '' ? parts[1] : undefined;
+  return /^Bearer +(\S+)$/i.exec(headers.authorization?.trim() ?? '')?.[1];
+}
+
+/**
+ * Id tokens are JWTs: three base64url segments, the first a JSON header (`eyJ` is
+ * base64 for `{"`). Google access tokens are opaque strings such as `ya29.…`.
+ */
+function looksLikeJwt(token: string): boolean {
+  return /^eyJ[\w-]*\.[\w-]+\.[\w-]+$/.test(token);
 }
 
 function toTokenCheck(claims: unknown): TokenCheck {

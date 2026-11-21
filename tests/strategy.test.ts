@@ -122,6 +122,40 @@ describe('GoogleTokenStrategy', () => {
       expect(outcome.kind).toBe('success');
     });
 
+    it('reads the `credential` field Google Identity Services posts', async () => {
+      const { strategy, verify } = createStrategy();
+      const outcome = await runStrategy(strategy, {
+        headers: {},
+        body: { credential: signIdToken(), g_csrf_token: 'csrf' },
+      });
+
+      expect(outcome.kind).toBe('success');
+      expect(verify.mock.calls[0][1]).toBe(GOOGLE_USER_ID);
+    });
+
+    it('only reads `credential` from the body', async () => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: {},
+        query: { credential: signIdToken() },
+      });
+      expect(outcome).toMatchObject({ kind: 'fail', status: 401 });
+    });
+
+    it('prefers `id_token` over `credential`', async () => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: {},
+        body: { id_token: signIdToken(), credential: 'not-a-jwt' },
+      });
+      expect(outcome.kind).toBe('success');
+    });
+
+    it.each(['Bearer', 'bearer', 'BEARER'])('reads an id token sent as a `%s` authorization header', async (scheme) => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: { authorization: `${scheme} ${signIdToken()}` },
+      });
+      expect(outcome.kind).toBe('success');
+    });
+
     it('prefers the body over the query string', async () => {
       const outcome = await runStrategy(createStrategy().strategy, {
         headers: {},
@@ -228,6 +262,40 @@ describe('GoogleTokenStrategy', () => {
       expect(accepted.kind).toBe('success');
       expect(rejected.kind).toBe('fail');
     });
+
+    it.each(['bearer', 'BEARER'])('accepts the `%s` scheme, which is case-insensitive', async (scheme) => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: { authorization: `${scheme} ${issueAccessToken()}` },
+      });
+      expect(outcome.kind).toBe('success');
+    });
+
+    it('tolerates extra whitespace around the Bearer credentials', async () => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: { authorization: `  Bearer   ${issueAccessToken()}  ` },
+      });
+      expect(outcome.kind).toBe('success');
+    });
+
+    it('prefers an `access_token` parameter over the Bearer header', async () => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: { authorization: 'Bearer ya29.revoked' },
+        body: { access_token: issueAccessToken() },
+      });
+      expect(outcome.kind).toBe('success');
+    });
+
+    it.each(['Bearer', 'Bearer ', 'Bearer a b'])(
+      'ignores the malformed authorization header %j',
+      async (authorization) => {
+        const outcome = await runStrategy(createStrategy().strategy, { headers: { authorization } });
+        expect(outcome).toEqual({
+          kind: 'fail',
+          challenge: { message: 'no Google authentication token provided' },
+          status: 401,
+        });
+      },
+    );
 
     it('ignores authorization headers that are not Bearer credentials', async () => {
       const outcome = await runStrategy(createStrategy().strategy, {
