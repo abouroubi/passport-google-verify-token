@@ -28,7 +28,8 @@ export function runStrategy(strategy: GoogleTokenStrategy, req: AuthenticateRequ
       });
     };
 
-    const instance: GoogleTokenStrategy = Object.create(strategy);
+    // Object.create() is typed as returning `any`; the prototype is what gives the instance its shape.
+    const instance = Object.create(strategy) as GoogleTokenStrategy;
     instance.success = (user: unknown, info?: unknown) => record({ kind: 'success', user, info });
     instance.fail = (challenge?: unknown, status?: number) =>
       typeof challenge === 'number'

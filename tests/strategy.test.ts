@@ -35,6 +35,7 @@ describe('GoogleTokenStrategy', () => {
     });
 
     it('throws when no verify callback is given', () => {
+      // @ts-expect-error -- JavaScript callers can omit the callback
       expect(() => new Strategy({ clientID: CLIENT_ID })).toThrow(
         'GoogleVerifyTokenStrategy requires a verify function',
       );
@@ -55,6 +56,14 @@ describe('GoogleTokenStrategy', () => {
       const outcome = await runStrategy(createStrategy().strategy, {
         headers: {},
         body: { id_token: '', access_token: '' },
+      });
+      expect(outcome).toMatchObject({ kind: 'fail', status: 401 });
+    });
+
+    it('treats non-string token values, such as repeated query parameters, as missing', async () => {
+      const outcome = await runStrategy(createStrategy().strategy, {
+        headers: {},
+        query: { id_token: [signIdToken(), signIdToken()], access_token: { nested: 'value' } },
       });
       expect(outcome).toMatchObject({ kind: 'fail', status: 401 });
     });
@@ -200,6 +209,33 @@ describe('GoogleTokenStrategy', () => {
       );
       const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: signIdToken() } });
       expect(outcome).toMatchObject({ kind: 'fail', challenge: { message: 'account disabled' } });
+    });
+
+    it.each([
+      { token: 'id token', req: () => ({ headers: {}, body: { id_token: signIdToken() } }) },
+      { token: 'access token', req: () => ({ headers: {}, body: { access_token: issueAccessToken() } }) },
+    ])('reports an exception thrown by the verify callback as a single error ($token)', async ({ req }) => {
+      const failure = new Error('bug in verify');
+      const { strategy } = createStrategy(
+        {},
+        vi.fn<VerifyFunction>(() => {
+          throw failure;
+        }),
+      );
+      const outcome = await runStrategy(strategy, req());
+      expect(outcome).toEqual({ kind: 'error', error: failure });
+    });
+
+    it('wraps a non-Error thrown by the verify callback in an Error', async () => {
+      const { strategy } = createStrategy(
+        {},
+        vi.fn<VerifyFunction>(() => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error -- simulating careless user code
+          throw 'plain string';
+        }),
+      );
+      const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: signIdToken() } });
+      expect(outcome).toEqual({ kind: 'error', error: new Error('plain string') });
     });
   });
 });

@@ -1,241 +1,189 @@
-/**
- * Module dependencies.
- */
+import type { IncomingHttpHeaders } from 'node:http';
 import { OAuth2Client } from 'google-auth-library';
 import { Strategy } from 'passport-strategy';
 
-export type VerifyDone = (error: Error | null, user?: unknown, info?: unknown) => void;
-export type ParsedToken = Record<string, unknown>;
-export type VerifyFunction = (parsedToken: ParsedToken, googleId: string | ParsedToken, done: VerifyDone) => void;
+const USER_INFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
 
 /**
- * Options accepted by GoogleTokenStrategy
- *
- * - clientID: A single Google OAuth client ID, or an array of client IDs
- * - audience: Optional audience override (string or array). Defaults to `clientID`.
- * - passReqToCallback: If true, the request object will be passed to the verify callback
+ * The parts of an incoming HTTP request the strategy reads tokens from.
+ * Express, Fastify and NestJS requests all satisfy it.
  */
-export interface GoogleTokenStrategyOptions {
-  clientID: string | string[];
-  passReqToCallback?: boolean;
-  audience?: string | string[];
+export interface TokenRequest {
+  headers: IncomingHttpHeaders;
+  body?: Record<string, unknown> | null;
+  query?: Record<string, unknown>;
+  params?: Record<string, unknown>;
 }
 
 /**
- * `Strategy` constructor.
+ * The verified identity handed to the verify callback: the claims of an id token,
+ * or the Google userinfo profile of an access token.
+ */
+export interface ParsedToken {
+  sub?: string;
+  email?: string;
+  email_verified?: boolean;
+  name?: string;
+  given_name?: string;
+  family_name?: string;
+  picture?: string;
+  locale?: string;
+  hd?: string;
+  [claim: string]: unknown;
+}
+
+export type VerifyDone = (error: Error | null, user?: unknown, info?: unknown) => void;
+export type VerifyFunction = (parsedToken: ParsedToken, googleId: string | ParsedToken, done: VerifyDone) => void;
+
+export interface GoogleTokenStrategyOptions {
+  /** The OAuth client ID of your app, or several (e.g. web, Android and iOS). */
+  clientID: string | string[];
+  /** Acceptable token audiences. Defaults to `clientID`. */
+  audience?: string | string[];
+  passReqToCallback?: boolean;
+}
+
+type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; message: string };
+
+/**
+ * Passport strategy that authenticates requests carrying a Google id token or
+ * access token, verified server side with the official Google Auth Library.
  *
- * The Google authentication strategy authenticates requests by verifying the
- * signature and fields of the token.
- *
- * Applications must supply a `verify` callback which accepts the `idToken`
- * coming from the user to be authenticated, and then calls the `done` callback
- * supplying a `parsedToken` (with all its information in visible form) and the
- * `googleId`.
- *
- * Options:
- * - clientID: your Google application's client id (or several as Array)
- * - audience: optional string or string[] of acceptable audiences; defaults to clientID
- *
- * Notes:
- * - The underlying Google OAuth2 client is created using the options object
- *   (OAuth2ClientOptions) to avoid deprecated constructor signatures.
- *
- * Examples:
- *
- * passport.use(new GoogleTokenStrategy({
- *     clientID: '12345.abcdefghijkl.apps.googleusercontent.com'// Specify the CLIENT_ID of the app that accesses the backend
- *    // Or, if multiple clients access the backend:
- *    //[CLIENT_ID_1, CLIENT_ID_2, CLIENT_ID_3]
+ * @example
+ * passport.use(new GoogleTokenStrategy(
+ *   { clientID: '12345.apps.googleusercontent.com' },
+ *   (parsedToken, googleId, done) => {
+ *     User.findOrCreate({ googleId }, (err, user) => done(err, user));
  *   },
- *   function(parsedToken, googleId, done) {
- *     User.findOrCreate(..., function (err, user) {
- *       done(err, user);
- *     });
- *   }
  * ));
- *
- * @param {Object} options
- * @param {Function} verify
- * @api public
  */
 export class GoogleTokenStrategy extends Strategy {
-  public name: string;
-  public googleAuthClient: OAuth2Client;
-  public verify: VerifyFunction;
-  public clientID: string | string[] | undefined;
-  public passReqToCallback?: boolean;
-  public audience: string | string[] | undefined;
+  public name = 'google-verify-token';
+  public readonly googleAuthClient: OAuth2Client;
+  public readonly clientID: string | string[] | undefined;
+  public readonly audience: string | string[] | undefined;
+  public readonly passReqToCallback: boolean | undefined;
+  private readonly verify: VerifyFunction;
 
-  constructor(options: GoogleTokenStrategyOptions | VerifyFunction, verify?: VerifyFunction) {
+  constructor(verify: VerifyFunction);
+  constructor(options: GoogleTokenStrategyOptions, verify: VerifyFunction);
+  constructor(optionsOrVerify: GoogleTokenStrategyOptions | VerifyFunction, verify?: VerifyFunction) {
     super();
 
-    let opts: GoogleTokenStrategyOptions | undefined;
-    if (typeof options === 'function') {
-      verify = options;
-      opts = undefined;
-    } else {
-      opts = options;
-    }
-
-    if (!verify) {
+    const options = typeof optionsOrVerify === 'function' ? undefined : optionsOrVerify;
+    const verifyCallback = typeof optionsOrVerify === 'function' ? optionsOrVerify : verify;
+    if (!verifyCallback) {
       throw new Error('GoogleVerifyTokenStrategy requires a verify function');
     }
 
-    this.passReqToCallback = opts?.passReqToCallback;
-
-    this.clientID = opts?.clientID;
-
-    this.name = 'google-verify-token';
-    const oauthOptions: { clientId?: string } = {};
-    if (typeof this.clientID === 'string') {
-      oauthOptions.clientId = this.clientID;
-    }
-    this.googleAuthClient = new OAuth2Client(oauthOptions);
-    this.verify = verify as VerifyFunction;
-    this.audience = opts?.audience ?? this.clientID;
+    this.verify = verifyCallback;
+    this.clientID = options?.clientID;
+    this.audience = options?.audience ?? this.clientID;
+    this.passReqToCallback = options?.passReqToCallback;
+    this.googleAuthClient = new OAuth2Client(typeof this.clientID === 'string' ? { clientId: this.clientID } : {});
   }
 
-  /**
-   * Internal function that handles successes/failures
-   *
-   * @param {any} err
-   * @param {any?} parsedToken
-   * @param {any?} info
-   */
-  public done(err: any, parsedToken?: any, info?: any) {
-    if (err) {
-      return this.fail({ message: err.message }, 401);
+  public authenticate(req: TokenRequest): void {
+    // Passport ignores authenticate()'s return value, so async failures (Google being
+    // unreachable, a throwing verify callback) must reach this.error() instead of
+    // becoming unhandled rejections.
+    this.authenticateRequest(req).catch((err: unknown) => this.error(toError(err)));
+  }
+
+  private async authenticateRequest(req: TokenRequest): Promise<void> {
+    const idToken = readTokenParam(req, 'id_token');
+    const accessToken = readTokenParam(req, 'access_token') ?? readBearerToken(req.headers);
+
+    let check: TokenCheck;
+    if (idToken) {
+      check = await this.checkIdToken(idToken);
+    } else if (accessToken) {
+      check = await this.checkAccessToken(accessToken);
+    } else {
+      this.fail({ message: 'no Google authentication token provided' }, 401);
+      return;
     }
 
-    if (!parsedToken) {
-      return this.fail(info);
+    if (!check.valid) {
+      this.fail({ message: check.message }, 401);
+      return;
     }
 
-    const verified = (error: any, user: any, infoOnUser: any) => {
+    const { parsedToken } = check;
+    this.verify(parsedToken, parsedToken.sub ?? parsedToken, (error, user, info) => {
       if (error) {
-        return this.error(error);
+        this.error(error);
+      } else if (!user) {
+        this.fail(info, 401);
+      } else {
+        this.success(user, info);
       }
-      if (!user) {
-        return this.fail(infoOnUser);
+    });
+  }
+
+  private async checkIdToken(idToken: string): Promise<TokenCheck> {
+    try {
+      const ticket = await this.googleAuthClient.verifyIdToken({ idToken, audience: this.audience });
+      const payload = ticket.getPayload();
+      return payload
+        ? { valid: true, parsedToken: { ...payload } }
+        : { valid: false, message: 'No login ticket returned' };
+    } catch (err) {
+      return { valid: false, message: errorMessage(err, 'Failed to verify id token') };
+    }
+  }
+
+  private async checkAccessToken(accessToken: string): Promise<TokenCheck> {
+    try {
+      await this.googleAuthClient.getTokenInfo(accessToken);
+    } catch (err) {
+      return { valid: false, message: errorMessage(err, 'failed to verify access token') };
+    }
+
+    try {
+      const response = await fetch(USER_INFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) {
+        return { valid: false, message: 'failed to get userinfo' };
       }
-      this.success(user, infoOnUser);
-    };
-
-    if (parsedToken.sub) this.verify(parsedToken, parsedToken.sub, verified);
-    else {
-      this.verify(parsedToken, parsedToken, verified);
+      const profile: unknown = await response.json();
+      return isParsedToken(profile)
+        ? { valid: true, parsedToken: profile }
+        : { valid: false, message: 'failed to get userinfo' };
+    } catch {
+      return { valid: false, message: 'failed to get userinfo' };
     }
   }
+}
 
-  /**
-   * Authenticate request by verifying the token
-   *
-   * @param {Object} req
-   * @param {Object} options
-   * @api protected
-   */
-  public authenticate(req: any, _options?: any) {
-    // options currently unused but kept for API symmetry with passport strategies
-
-    const accessToken = this.paramFromRequest(req, 'access_token') || this.getBearerToken(req.headers);
-    const idToken = this.paramFromRequest(req, 'id_token');
-
-    if (idToken) this.verifyGoogleIdToken(idToken);
-    else if (accessToken) this.verifyGoogleAccessToken(accessToken);
-    else {
-      return this.fail({ message: 'no Google authentication token provided' }, 401);
+/** Reads a non-empty string token from the body, query string, headers or route params, in that order. */
+function readTokenParam(req: TokenRequest, name: string): string | undefined {
+  for (const source of [req.body, req.query, req.headers, req.params]) {
+    const value = source?.[name];
+    if (typeof value === 'string' && value !== '') {
+      return value;
     }
   }
+  return undefined;
+}
 
-  /**
-   * Verify signature and token fields for an id_token using google-auth-library.
-   *
-   * @param {String} idToken
-   * @api protected
-   */
-  public verifyGoogleIdToken(idToken: string) {
-    (async () => {
-      try {
-        const loginTicket = await this.googleAuthClient.verifyIdToken({
-          audience: this.audience,
-          idToken,
-        });
-        const payload = loginTicket.getPayload();
-        if (payload) {
-          this.done(null, payload);
-        } else {
-          this.done(null, false, { message: 'No login ticket returned' });
-        }
-      } catch (err: any) {
-        this.done(null, false, { message: err?.message ?? 'Failed to verify id token' });
-      }
-    })();
-  }
+function readBearerToken(headers: IncomingHttpHeaders): string | undefined {
+  const parts = headers.authorization?.split(' ');
+  return parts?.length === 2 && parts[0] === 'Bearer' && parts[1] !== '' ? parts[1] : undefined;
+}
 
-  /**
-   * Validate access token with google-auth-library, then fetch userinfo from
-   * Google's OIDC endpoint using a Bearer Authorization header.
-   *
-   * @param {String} accessToken
-   * @api protected
-   */
-  public verifyGoogleAccessToken(accessToken: string) {
-    (async () => {
-      try {
-        const tokenInfo = await this.googleAuthClient.getTokenInfo(accessToken);
-        if (!tokenInfo) {
-          this.done(null, false, { message: 'invalid access token' });
-          return;
-        }
+function isParsedToken(value: unknown): value is ParsedToken {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    ['string', 'undefined'].includes(typeof Reflect.get(value, 'sub'))
+  );
+}
 
-        // Retrieve user info using the access token
-        try {
-          const resp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-          if (!resp.ok) {
-            this.done(null, false, { message: 'failed to get userinfo' });
-            return;
-          }
-          const userinfo = await resp.json();
-          this.done(null, userinfo);
-        } catch {
-          this.done(null, false, { message: 'failed to get userinfo' });
-        }
-      } catch (e: any) {
-        this.done(null, false, { message: e?.message ?? 'failed to verify access token' });
-      }
-    })();
-  }
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
 
-  /**
-   * Gets the id token value from req using name for lookup in req.body, req.query,
-   * and req.params.
-   * @param {express.Request} req
-   * @param {string} name  the key to use to lookup id token in req.
-   * @api protected
-   */
-  private paramFromRequest(req: any, name: string) {
-    const body = req.body || {};
-    const query = req.query || {};
-    const params = req.params || {};
-    const headers = req.headers || {};
-    if (body[name]) {
-      return body[name];
-    }
-    if (query[name]) {
-      return query[name];
-    }
-    if (headers[name]) {
-      return headers[name];
-    }
-    return params[name] || '';
-  }
-
-  private getBearerToken(headers: any) {
-    if (headers && headers.authorization) {
-      const parts = headers.authorization.split(' ');
-      return parts.length === 2 && parts[0] === 'Bearer' ? parts[1] : undefined;
-    }
-  }
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message !== '' ? err.message : fallback;
 }
