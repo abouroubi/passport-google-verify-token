@@ -14,6 +14,7 @@ import {
   issueAccessToken,
   signIdToken,
 } from './helpers/fake-google';
+import { captureUncaughtExceptions, captureUnhandledRejections } from './helpers/capture-process-errors';
 import { runStrategy } from './helpers/run-strategy';
 
 beforeAll(() => googleServer.listen({ onUnhandledFrame: 'error' }));
@@ -511,6 +512,77 @@ describe('GoogleTokenStrategy', () => {
       );
       const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: signIdToken() } });
       expect(outcome).toEqual({ kind: 'error', error: new Error('plain string') });
+    });
+
+    describe('after the request is settled', () => {
+      const ALREADY_SETTLED = new Error(
+        'GoogleTokenStrategy: the verify callback called done() after the request was already settled',
+      );
+      const idTokenRequest = () => ({ headers: {}, body: { id_token: signIdToken() } });
+
+      it('keeps the first outcome and rethrows an exception thrown after done()', async () => {
+        const lateFailure = new Error('bug after done');
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            throw lateFailure;
+          }),
+        );
+        const { result, processErrors } = await captureUnhandledRejections(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
+        expect(processErrors).toEqual([lateFailure]);
+      });
+
+      it('keeps the first outcome and rethrows a second done() call made synchronously', async () => {
+        const secondOutcome = new Error('second outcome');
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            done(secondOutcome);
+          }),
+        );
+        const { result, processErrors } = await captureUnhandledRejections(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
+        expect(processErrors).toEqual([ALREADY_SETTLED]);
+        expect(processErrors[0]).toHaveProperty('cause', secondOutcome);
+      });
+
+      it('throws from a second done() call made later, in the caller of done()', async () => {
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            setImmediate(() => done(null, false));
+          }),
+        );
+        const { result, processErrors } = await captureUncaughtExceptions(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
+        expect(processErrors).toEqual([ALREADY_SETTLED]);
+      });
+
+      it('throws from done() called after the verify callback threw', async () => {
+        const failure = new Error('bug in verify');
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            setImmediate(() => done(null, USER, INFO));
+            throw failure;
+          }),
+        );
+        const { result, processErrors } = await captureUncaughtExceptions(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'error', error: failure });
+        expect(processErrors).toEqual([ALREADY_SETTLED]);
+      });
     });
   });
 });

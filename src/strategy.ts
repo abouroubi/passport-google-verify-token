@@ -64,6 +64,7 @@ type StrategyArguments =
   | [options: GoogleTokenStrategyOptionsWithRequest, verify: VerifyFunctionWithRequest];
 
 type ExtractedToken = { kind: 'id' | 'access'; token: string };
+type Settle = (report: () => void, discardedError?: Error | null) => void;
 type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; message: string };
 
 /**
@@ -128,16 +129,35 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   public authenticate(req: TokenRequest): void {
-    // Passport ignores authenticate()'s return value, so async failures (Google being
-    // unreachable, a throwing verify callback) must reach this.error() instead of
-    // becoming unhandled rejections.
-    this.authenticateRequest(req).catch((err: unknown) => this.error(toError(err)));
+    // Passport responds to the request on its first success/fail/error call, so each
+    // request must report exactly one outcome.
+    let settled = false;
+    const settle: Settle = (report, discardedError) => {
+      if (settled) {
+        throw new Error(
+          'GoogleTokenStrategy: the verify callback called done() after the request was already settled',
+          discardedError ? { cause: discardedError } : undefined,
+        );
+      }
+      settled = true;
+      report();
+    };
+
+    // Passport ignores authenticate()'s return value, so async failures must reach
+    // this.error(). Once the request is settled there is no outcome left to report
+    // them through, so they are rethrown rather than swallowed.
+    this.authenticateRequest(req, settle).catch((err: unknown) => {
+      if (settled) {
+        throw err;
+      }
+      settle(() => this.error(toError(err)));
+    });
   }
 
-  private async authenticateRequest(req: TokenRequest): Promise<void> {
+  private async authenticateRequest(req: TokenRequest, settle: Settle): Promise<void> {
     const extracted = extractToken(req);
     if (!extracted) {
-      this.fail({ message: 'no Google authentication token provided' }, 401);
+      settle(() => this.fail({ message: 'no Google authentication token provided' }, 401));
       return;
     }
 
@@ -145,20 +165,22 @@ export class GoogleTokenStrategy extends Strategy {
       extracted.kind === 'id' ? await this.checkIdToken(extracted.token) : await this.checkAccessToken(extracted.token);
 
     if (!check.valid) {
-      this.fail({ message: check.message }, 401);
+      settle(() => this.fail({ message: check.message }, 401));
       return;
     }
 
     const { parsedToken } = check;
-    this.verify(req, parsedToken, parsedToken.sub, (error, user, info) => {
-      if (error) {
-        this.error(error);
-      } else if (!user) {
-        this.fail(info, 401);
-      } else {
-        this.success(user, info);
-      }
-    });
+    this.verify(req, parsedToken, parsedToken.sub, (error, user, info) =>
+      settle(() => {
+        if (error) {
+          this.error(error);
+        } else if (!user) {
+          this.fail(info, 401);
+        } else {
+          this.success(user, info);
+        }
+      }, error),
+    );
   }
 
   private async checkIdToken(idToken: string): Promise<TokenCheck> {
