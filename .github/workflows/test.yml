@@ -3,6 +3,12 @@ on:
   pull_request:
     branches: [master]
   workflow_call:
+    inputs:
+      ref:
+        description: Git ref to test; defaults to the commit that triggered the caller
+        required: false
+        type: string
+        default: ''
 
 jobs:
   test:
@@ -12,6 +18,8 @@ jobs:
         node-version: [22.x, 24.x]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v7
         with:

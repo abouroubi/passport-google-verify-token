@@ -3,6 +3,13 @@ name: Release
 on:
   push:
     branches: [master]
+  # Re-stages an existing release tag whose publish did not complete.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to stage on npm, such as v4.0.0
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,22 +26,25 @@ jobs:
       issues: write
       pull-requests: write
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      publish: ${{ steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+      tag: ${{ steps.release.outputs.tag_name || inputs.tag }}
     steps:
       - id: release
+        if: github.event_name == 'push'
         uses: googleapis/release-please-action@v5.0.0
 
   # The release PR is opened with GITHUB_TOKEN, which never triggers PR workflows,
   # so the release commit is tested here before it is published.
   test:
     needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.publish == 'true'
     uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag }}
 
   publish:
     needs: [release-please, test]
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -42,11 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.tag }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
           registry-url: https://registry.npmjs.org/
       - run: npm ci
-      # npm trusted publishing (OIDC), configured for this workflow file on npmjs.com.
-      - run: npm publish --provenance --access public
+      # The npm trusted publisher for this workflow may only stage: a maintainer
+      # approves each staged version with 2FA before it goes live.
+      - run: npm stage publish --provenance --access public
