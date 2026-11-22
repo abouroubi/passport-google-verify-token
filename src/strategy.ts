@@ -194,7 +194,7 @@ export class GoogleTokenStrategy extends Strategy {
       if (err instanceof GaxiosError) {
         throw new Error('Could not fetch Google signing certificates', { cause: err });
       }
-      return { valid: false, message: errorMessage(err, 'Failed to verify id token') };
+      return { valid: false, message: idTokenRejectionMessage(err) };
     }
     return toTokenCheck(payload);
   }
@@ -320,6 +320,27 @@ function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message !== '' ? err.message : fallback;
+// google-auth-library's id token errors embed the token or its decoded claims (the
+// user's email, name and Google id), and apps log failure info.
+const ID_TOKEN_REJECTIONS: ReadonlyArray<readonly [libraryMessagePrefix: string, message: string]> = [
+  ['Wrong number of segments in token', 'id token is malformed'],
+  ["Can't parse token envelope", 'id token is malformed'],
+  ["Can't parse token payload", 'id token is malformed'],
+  ['No issue time in token', 'id token is malformed'],
+  ['No expiration time in token', 'id token is malformed'],
+  ['iat field using invalid format', 'id token is malformed'],
+  ['exp field using invalid format', 'id token is malformed'],
+  ['No pem found for envelope', 'id token signature is invalid'],
+  ['Invalid token signature', 'id token signature is invalid'],
+  ['Expiration time too far in future', 'id token expires too far in the future'],
+  ['Token used too early', 'id token is not valid yet'],
+  ['Token used too late', 'id token has expired'],
+  ['Invalid issuer', 'id token was not issued by Google'],
+  ['Wrong recipient', 'id token was not issued to an allowed audience'],
+];
+
+function idTokenRejectionMessage(err: unknown): string {
+  const libraryMessage = err instanceof Error ? err.message : '';
+  const rejection = ID_TOKEN_REJECTIONS.find(([prefix]) => libraryMessage.startsWith(prefix));
+  return rejection?.[1] ?? 'invalid id token';
 }

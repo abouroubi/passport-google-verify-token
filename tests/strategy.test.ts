@@ -12,6 +12,7 @@ import {
   http,
   HttpResponse,
   issueAccessToken,
+  nowInSeconds,
   signIdToken,
 } from './helpers/fake-google';
 import { captureUncaughtExceptions, captureUnhandledRejections } from './helpers/capture-process-errors';
@@ -192,17 +193,85 @@ describe('GoogleTokenStrategy', () => {
       expect(rejected.kind).toBe('fail');
     });
 
+    // Exact messages also prove that neither the token nor its claims (email, user id)
+    // end up in the failure info, which apps log.
     it.each([
-      { problem: 'is issued to another client', token: () => signIdToken({ aud: OTHER_CLIENT_ID }) },
-      { problem: 'has expired', token: () => signIdToken({ iat: 1_000_000, exp: 1_003_600 }) },
-      { problem: 'has a foreign issuer', token: () => signIdToken({ iss: 'https://evil.example.com' }) },
-      { problem: 'is signed with an untrusted key', token: () => signIdToken({}, { trusted: false }) },
-      { problem: 'is not a JWT', token: () => 'not-a-jwt' },
-    ])('fails without calling verify when the token $problem', async ({ token }) => {
+      {
+        problem: 'is issued to another client',
+        token: () => signIdToken({ aud: OTHER_CLIENT_ID }),
+        message: 'id token was not issued to an allowed audience',
+      },
+      {
+        problem: 'has expired',
+        token: () => signIdToken({ iat: 1_000_000, exp: 1_003_600 }),
+        message: 'id token has expired',
+      },
+      {
+        problem: 'is not valid yet',
+        token: () => signIdToken({ iat: nowInSeconds() + 3600, exp: nowInSeconds() + 7200 }),
+        message: 'id token is not valid yet',
+      },
+      {
+        problem: 'expires more than a day after now',
+        token: () => signIdToken({ exp: nowInSeconds() + 2 * 86_400 }),
+        message: 'id token expires too far in the future',
+      },
+      {
+        problem: 'has a foreign issuer',
+        token: () => signIdToken({ iss: 'https://evil.example.com' }),
+        message: 'id token was not issued by Google',
+      },
+      {
+        problem: 'is signed with an untrusted key',
+        token: () => signIdToken({}, { trusted: false }),
+        message: 'id token signature is invalid',
+      },
+      {
+        problem: 'names a signing key Google does not publish',
+        token: () => signIdToken({}, { header: { kid: 'retired-key' } }),
+        message: 'id token signature is invalid',
+      },
+      {
+        problem: 'has no issue time',
+        token: () => signIdToken({ iat: undefined }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has an issue time that is not a number',
+        token: () => signIdToken({ iat: 'yesterday' }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has no expiry time',
+        token: () => signIdToken({ exp: undefined }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has an expiry time that is not a number',
+        token: () => signIdToken({ exp: 'tomorrow' }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has a header that is not JSON',
+        token: () => `bm90IGpzb24.${signIdToken().split('.')[1]}.c2ln`,
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has a payload that is not JSON',
+        token: () => `${signIdToken().split('.')[0]}.bm90IGpzb24.c2ln`,
+        message: 'id token is malformed',
+      },
+      { problem: 'is not a JWT', token: () => 'not-a-jwt', message: 'id token is malformed' },
+      {
+        problem: 'is rejected with an error the strategy does not recognise (a malformed ES256 signature)',
+        token: () => signIdToken({}, { header: { alg: 'ES256' } }),
+        message: 'invalid id token',
+      },
+    ])('fails without calling verify when the token $problem', async ({ token, message }) => {
       const { strategy, verify } = createStrategy();
       const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: token() } });
 
-      expect(outcome).toMatchObject({ kind: 'fail', challenge: { message: expect.any(String) } });
+      expect(outcome).toEqual({ kind: 'fail', challenge: { message }, status: 401 });
       expect(verify).not.toHaveBeenCalled();
     });
   });
