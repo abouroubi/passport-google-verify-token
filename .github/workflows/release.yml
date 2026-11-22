@@ -1,65 +1,71 @@
-# This workflow will do a clean install of node dependencies, build the source code and run tests across different versions of node
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
-
-name: Build, tag and release
+name: Build, tag, release and publish
 
 on:
   push:
     branches: [master]
-    
+
 env:
-  NODE_VERSION: 20.x
+  NODE_VERSION: 24.x
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, 'version bump to') || !contains(github.event.head_commit.message, 'skip ci')"
-    steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ env.NODE_VERSION }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-    - run: npm ci
-    - run: npm run test
-    - run: npm run build --if-present
+    if: "!contains(github.event.head_commit.message, 'ci: version bump to')"
+    uses: ./.github/workflows/test.yml
 
-
-  build:
+  bump:
     needs: [test]
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
     outputs:
-      tag: ${{ steps.tag_name.outputs.TAG }}
+      tag: ${{ steps.bump.outputs.newTag }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ env.NODE_VERSION }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-    - run: npm ci
-    - run: npm run build
-    - name: Automated Version Bump
-      uses: phips28/gh-action-bump-version@master
-    - name: Export TAG Parameter
-      id: tag_name
-      run: echo "TAG=$(jq -r .version < package.json)" >> $GITHUB_OUTPUT
-      shell: bash
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Major for `type!:` or "BREAKING CHANGE" commits, minor for `feat`, patch otherwise.
+      - id: bump
+        uses: phips28/gh-action-bump-version@v11.0.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag-prefix: v
 
+  # Publishing happens here rather than in a workflow triggered by the release:
+  # events caused by GITHUB_TOKEN never start other workflows.
+  publish:
+    needs: [bump]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      # npm trusted publishing (OIDC), configured for this workflow file on npmjs.com.
+      - run: npm publish --provenance --access public
 
   release:
-    needs: [build]
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    needs: [bump, publish]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ env.NODE_VERSION }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-    - name: GH Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: "v${{ needs.build.outputs.tag }}"
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.bump.outputs.tag }}
+          generate_release_notes: true
