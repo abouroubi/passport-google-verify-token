@@ -95,6 +95,8 @@ If you use Google Identity Services in redirect mode (`data-login_uri`), Google 
 
 A missing or rejected token fails authentication with `401`. If Google cannot be reached or answers with a server error, the strategy reports an error instead (Passport answers `500`), so an outage is never mistaken for a bad token.
 
+When a token is rejected, the strategy passes Passport an info object whose `message` says why, such as `id token has expired`. It never contains the token or its claims, so it is safe to log, but show end users a generic message.
+
 ## Migrating from v3
 
 - **Node.js 22 or later** is required, and `google-auth-library` is updated to v11.
