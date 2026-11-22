@@ -12,8 +12,10 @@ import {
   http,
   HttpResponse,
   issueAccessToken,
+  nowInSeconds,
   signIdToken,
 } from './helpers/fake-google';
+import { captureUncaughtExceptions, captureUnhandledRejections } from './helpers/capture-process-errors';
 import { runStrategy } from './helpers/run-strategy';
 
 beforeAll(() => googleServer.listen({ onUnhandledFrame: 'error' }));
@@ -191,17 +193,85 @@ describe('GoogleTokenStrategy', () => {
       expect(rejected.kind).toBe('fail');
     });
 
+    // Exact messages also prove that neither the token nor its claims (email, user id)
+    // end up in the failure info, which apps log.
     it.each([
-      { problem: 'is issued to another client', token: () => signIdToken({ aud: OTHER_CLIENT_ID }) },
-      { problem: 'has expired', token: () => signIdToken({ iat: 1_000_000, exp: 1_003_600 }) },
-      { problem: 'has a foreign issuer', token: () => signIdToken({ iss: 'https://evil.example.com' }) },
-      { problem: 'is signed with an untrusted key', token: () => signIdToken({}, { trusted: false }) },
-      { problem: 'is not a JWT', token: () => 'not-a-jwt' },
-    ])('fails without calling verify when the token $problem', async ({ token }) => {
+      {
+        problem: 'is issued to another client',
+        token: () => signIdToken({ aud: OTHER_CLIENT_ID }),
+        message: 'id token was not issued to an allowed audience',
+      },
+      {
+        problem: 'has expired',
+        token: () => signIdToken({ iat: 1_000_000, exp: 1_003_600 }),
+        message: 'id token has expired',
+      },
+      {
+        problem: 'is not valid yet',
+        token: () => signIdToken({ iat: nowInSeconds() + 3600, exp: nowInSeconds() + 7200 }),
+        message: 'id token is not valid yet',
+      },
+      {
+        problem: 'expires more than a day after now',
+        token: () => signIdToken({ exp: nowInSeconds() + 2 * 86_400 }),
+        message: 'id token expires too far in the future',
+      },
+      {
+        problem: 'has a foreign issuer',
+        token: () => signIdToken({ iss: 'https://evil.example.com' }),
+        message: 'id token was not issued by Google',
+      },
+      {
+        problem: 'is signed with an untrusted key',
+        token: () => signIdToken({}, { trusted: false }),
+        message: 'id token signature is invalid',
+      },
+      {
+        problem: 'names a signing key Google does not publish',
+        token: () => signIdToken({}, { header: { kid: 'retired-key' } }),
+        message: 'id token signature is invalid',
+      },
+      {
+        problem: 'has no issue time',
+        token: () => signIdToken({ iat: undefined }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has an issue time that is not a number',
+        token: () => signIdToken({ iat: 'yesterday' }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has no expiry time',
+        token: () => signIdToken({ exp: undefined }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has an expiry time that is not a number',
+        token: () => signIdToken({ exp: 'tomorrow' }),
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has a header that is not JSON',
+        token: () => `bm90IGpzb24.${signIdToken().split('.')[1]}.c2ln`,
+        message: 'id token is malformed',
+      },
+      {
+        problem: 'has a payload that is not JSON',
+        token: () => `${signIdToken().split('.')[0]}.bm90IGpzb24.c2ln`,
+        message: 'id token is malformed',
+      },
+      { problem: 'is not a JWT', token: () => 'not-a-jwt', message: 'id token is malformed' },
+      {
+        problem: 'is rejected with an error the strategy does not recognise (a malformed ES256 signature)',
+        token: () => signIdToken({}, { header: { alg: 'ES256' } }),
+        message: 'invalid id token',
+      },
+    ])('fails without calling verify when the token $problem', async ({ token, message }) => {
       const { strategy, verify } = createStrategy();
       const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: token() } });
 
-      expect(outcome).toMatchObject({ kind: 'fail', challenge: { message: expect.any(String) } });
+      expect(outcome).toEqual({ kind: 'fail', challenge: { message }, status: 401 });
       expect(verify).not.toHaveBeenCalled();
     });
   });
@@ -511,6 +581,77 @@ describe('GoogleTokenStrategy', () => {
       );
       const outcome = await runStrategy(strategy, { headers: {}, body: { id_token: signIdToken() } });
       expect(outcome).toEqual({ kind: 'error', error: new Error('plain string') });
+    });
+
+    describe('after the request is settled', () => {
+      const ALREADY_SETTLED = new Error(
+        'GoogleTokenStrategy: the verify callback called done() after the request was already settled',
+      );
+      const idTokenRequest = () => ({ headers: {}, body: { id_token: signIdToken() } });
+
+      it('keeps the first outcome and rethrows an exception thrown after done()', async () => {
+        const lateFailure = new Error('bug after done');
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            throw lateFailure;
+          }),
+        );
+        const { result, processErrors } = await captureUnhandledRejections(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
+        expect(processErrors).toEqual([lateFailure]);
+      });
+
+      it('keeps the first outcome and rethrows a second done() call made synchronously', async () => {
+        const secondOutcome = new Error('second outcome');
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            done(secondOutcome);
+          }),
+        );
+        const { result, processErrors } = await captureUnhandledRejections(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
+        expect(processErrors).toEqual([ALREADY_SETTLED]);
+        expect(processErrors[0]).toHaveProperty('cause', secondOutcome);
+      });
+
+      it('throws from a second done() call made later, in the caller of done()', async () => {
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            setImmediate(() => done(null, false));
+          }),
+        );
+        const { result, processErrors } = await captureUncaughtExceptions(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
+        expect(processErrors).toEqual([ALREADY_SETTLED]);
+      });
+
+      it('throws from done() called after the verify callback threw', async () => {
+        const failure = new Error('bug in verify');
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            setImmediate(() => done(null, USER, INFO));
+            throw failure;
+          }),
+        );
+        const { result, processErrors } = await captureUncaughtExceptions(() =>
+          runStrategy(strategy, idTokenRequest()),
+        );
+        expect(result).toEqual({ kind: 'error', error: failure });
+        expect(processErrors).toEqual([ALREADY_SETTLED]);
+      });
     });
   });
 });

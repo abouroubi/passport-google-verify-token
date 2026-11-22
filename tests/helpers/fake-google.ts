@@ -15,7 +15,7 @@ const signingKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const untrustedKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
 
 const base64url = (value: string | Buffer) => Buffer.from(value).toString('base64url');
-const nowInSeconds = () => Math.floor(Date.now() / 1000);
+export const nowInSeconds = () => Math.floor(Date.now() / 1000);
 
 export type IdTokenClaims = Record<string, unknown>;
 
@@ -34,8 +34,11 @@ export function idTokenClaims(overrides: IdTokenClaims = {}): IdTokenClaims {
 }
 
 /** Signs an id token the way Google does (RS256), with a key the fake certs endpoint publishes. */
-export function signIdToken(overrides: IdTokenClaims = {}, { trusted = true } = {}): string {
-  const header = base64url(JSON.stringify({ alg: 'RS256', kid: KEY_ID, typ: 'JWT' }));
+export function signIdToken(
+  overrides: IdTokenClaims = {},
+  { trusted = true, header: headerOverrides = {} }: { trusted?: boolean; header?: Record<string, unknown> } = {},
+): string {
+  const header = base64url(JSON.stringify({ alg: 'RS256', kid: KEY_ID, typ: 'JWT', ...headerOverrides }));
   const payload = base64url(JSON.stringify(idTokenClaims(overrides)));
   const signer = createSign('RSA-SHA256');
   signer.update(`${header}.${payload}`);

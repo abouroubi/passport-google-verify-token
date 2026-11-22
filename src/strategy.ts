@@ -64,6 +64,7 @@ type StrategyArguments =
   | [options: GoogleTokenStrategyOptionsWithRequest, verify: VerifyFunctionWithRequest];
 
 type ExtractedToken = { kind: 'id' | 'access'; token: string };
+type Settle = (report: () => void, discardedError?: Error | null) => void;
 type TokenCheck = { valid: true; parsedToken: ParsedToken } | { valid: false; message: string };
 
 /**
@@ -128,16 +129,35 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   public authenticate(req: TokenRequest): void {
-    // Passport ignores authenticate()'s return value, so async failures (Google being
-    // unreachable, a throwing verify callback) must reach this.error() instead of
-    // becoming unhandled rejections.
-    this.authenticateRequest(req).catch((err: unknown) => this.error(toError(err)));
+    // Passport responds to the request on its first success/fail/error call, so each
+    // request must report exactly one outcome.
+    let settled = false;
+    const settle: Settle = (report, discardedError) => {
+      if (settled) {
+        throw new Error(
+          'GoogleTokenStrategy: the verify callback called done() after the request was already settled',
+          discardedError ? { cause: discardedError } : undefined,
+        );
+      }
+      settled = true;
+      report();
+    };
+
+    // Passport ignores authenticate()'s return value, so async failures must reach
+    // this.error(). Once the request is settled there is no outcome left to report
+    // them through, so they are rethrown rather than swallowed.
+    this.authenticateRequest(req, settle).catch((err: unknown) => {
+      if (settled) {
+        throw err;
+      }
+      settle(() => this.error(toError(err)));
+    });
   }
 
-  private async authenticateRequest(req: TokenRequest): Promise<void> {
+  private async authenticateRequest(req: TokenRequest, settle: Settle): Promise<void> {
     const extracted = extractToken(req);
     if (!extracted) {
-      this.fail({ message: 'no Google authentication token provided' }, 401);
+      settle(() => this.fail({ message: 'no Google authentication token provided' }, 401));
       return;
     }
 
@@ -145,20 +165,22 @@ export class GoogleTokenStrategy extends Strategy {
       extracted.kind === 'id' ? await this.checkIdToken(extracted.token) : await this.checkAccessToken(extracted.token);
 
     if (!check.valid) {
-      this.fail({ message: check.message }, 401);
+      settle(() => this.fail({ message: check.message }, 401));
       return;
     }
 
     const { parsedToken } = check;
-    this.verify(req, parsedToken, parsedToken.sub, (error, user, info) => {
-      if (error) {
-        this.error(error);
-      } else if (!user) {
-        this.fail(info, 401);
-      } else {
-        this.success(user, info);
-      }
-    });
+    this.verify(req, parsedToken, parsedToken.sub, (error, user, info) =>
+      settle(() => {
+        if (error) {
+          this.error(error);
+        } else if (!user) {
+          this.fail(info, 401);
+        } else {
+          this.success(user, info);
+        }
+      }, error),
+    );
   }
 
   private async checkIdToken(idToken: string): Promise<TokenCheck> {
@@ -172,7 +194,7 @@ export class GoogleTokenStrategy extends Strategy {
       if (err instanceof GaxiosError) {
         throw new Error('Could not fetch Google signing certificates', { cause: err });
       }
-      return { valid: false, message: errorMessage(err, 'Failed to verify id token') };
+      return { valid: false, message: idTokenRejectionMessage(err) };
     }
     return toTokenCheck(payload);
   }
@@ -298,6 +320,27 @@ function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message !== '' ? err.message : fallback;
+// google-auth-library's id token errors embed the token or its decoded claims (the
+// user's email, name and Google id), and apps log failure info.
+const ID_TOKEN_REJECTIONS: ReadonlyArray<readonly [libraryMessagePrefix: string, message: string]> = [
+  ['Wrong number of segments in token', 'id token is malformed'],
+  ["Can't parse token envelope", 'id token is malformed'],
+  ["Can't parse token payload", 'id token is malformed'],
+  ['No issue time in token', 'id token is malformed'],
+  ['No expiration time in token', 'id token is malformed'],
+  ['iat field using invalid format', 'id token is malformed'],
+  ['exp field using invalid format', 'id token is malformed'],
+  ['No pem found for envelope', 'id token signature is invalid'],
+  ['Invalid token signature', 'id token signature is invalid'],
+  ['Expiration time too far in future', 'id token expires too far in the future'],
+  ['Token used too early', 'id token is not valid yet'],
+  ['Token used too late', 'id token has expired'],
+  ['Invalid issuer', 'id token was not issued by Google'],
+  ['Wrong recipient', 'id token was not issued to an allowed audience'],
+];
+
+function idTokenRejectionMessage(err: unknown): string {
+  const libraryMessage = err instanceof Error ? err.message : '';
+  const rejection = ID_TOKEN_REJECTIONS.find(([prefix]) => libraryMessage.startsWith(prefix));
+  return rejection?.[1] ?? 'invalid id token';
 }

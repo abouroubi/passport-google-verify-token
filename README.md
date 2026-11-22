@@ -95,9 +95,17 @@ If you use Google Identity Services in redirect mode (`data-login_uri`), Google 
 
 A missing or rejected token fails authentication with `401`. If Google cannot be reached or answers with a server error, the strategy reports an error instead (Passport answers `500`), so an outage is never mistaken for a bad token.
 
+When a token is rejected, the strategy passes Passport an info object whose `message` says why, such as `id token has expired`. It never contains the token or its claims, so it is safe to log, but show end users a generic message.
+
 ## Migrating from v3
 
-See the [changelog](CHANGELOG.md#v400).
+- **Node.js 22 or later** is required, and `google-auth-library` is updated to v11.
+- **`clientID` is required.** `new Strategy(verify)` without options is no longer supported, and the constructor throws if `clientID` (or an explicit `audience`) is missing or empty. Without an audience, tokens issued to any Google application were accepted.
+- **Access tokens must be issued to your app.** Their tokeninfo `aud` must be one of `audience` (defaults to `clientID`). Previously any valid Google access token was accepted.
+- **Google outages are errors, not failures.** When Google cannot be reached or answers with a server error, the strategy calls `error()` (HTTP 500) instead of `fail()` (HTTP 401). An exception thrown by the verify callback is also reported as an error.
+- **Tokens must identify an account.** A token or profile without a `sub` fails authentication. `googleId` is always that `sub` string; it used to fall back to the whole token.
+- **Call `done` exactly once.** Calling it again, or throwing after calling it, is rethrown as an uncaught error instead of answering the request a second time.
+- **Types:** `ParsedToken` and `TokenRequest` describe the verified identity and the request; `audience` is exposed as a `string[]`; `done`, `verifyGoogleIdToken` and `verifyGoogleAccessToken` are no longer public methods.
 
 ## Credits
 
