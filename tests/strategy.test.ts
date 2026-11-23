@@ -15,8 +15,8 @@ import {
   nowInSeconds,
   signIdToken,
 } from './helpers/fake-google';
-import { captureUncaughtExceptions, captureUnhandledRejections } from './helpers/capture-process-errors';
-import { runStrategy } from './helpers/run-strategy';
+import { captureProcessErrors } from './helpers/capture-process-errors';
+import { collectOutcomes, runStrategy } from './helpers/run-strategy';
 
 beforeAll(() => googleServer.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => googleServer.resetHandlers());
@@ -583,13 +583,46 @@ describe('GoogleTokenStrategy', () => {
       expect(outcome).toEqual({ kind: 'error', error: new Error('plain string') });
     });
 
-    describe('after the request is settled', () => {
-      const ALREADY_SETTLED = new Error(
-        'GoogleTokenStrategy: the verify callback called done() after the request was already settled',
-      );
+    describe('when done() is called more than once', () => {
       const idTokenRequest = () => ({ headers: {}, body: { id_token: signIdToken() } });
 
-      it('keeps the first outcome and rethrows an exception thrown after done()', async () => {
+      it('reports each done() call to Passport, as other Passport strategies do', async () => {
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            done(null, false, { message: 'second call' });
+          }),
+        );
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 2 }),
+        );
+        expect(result).toEqual([
+          { kind: 'success', user: USER, info: INFO },
+          { kind: 'fail', challenge: { message: 'second call' }, status: 401 },
+        ]);
+        expect(processErrors).toEqual([]);
+      });
+
+      it('reports a done() call made after the first outcome on a later tick', async () => {
+        const { strategy } = createStrategy(
+          {},
+          vi.fn<VerifyFunction>((_t, _id, done) => {
+            done(null, USER, INFO);
+            setImmediate(() => done(null, false));
+          }),
+        );
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 2 }),
+        );
+        expect(result).toEqual([
+          { kind: 'success', user: USER, info: INFO },
+          { kind: 'fail', challenge: undefined, status: 401 },
+        ]);
+        expect(processErrors).toEqual([]);
+      });
+
+      it('reports an exception thrown after done() as an error', async () => {
         const lateFailure = new Error('bug after done');
         const { strategy } = createStrategy(
           {},
@@ -598,59 +631,134 @@ describe('GoogleTokenStrategy', () => {
             throw lateFailure;
           }),
         );
-        const { result, processErrors } = await captureUnhandledRejections(() =>
-          runStrategy(strategy, idTokenRequest()),
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 2 }),
         );
-        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
-        expect(processErrors).toEqual([lateFailure]);
+        expect(result).toEqual([
+          { kind: 'success', user: USER, info: INFO },
+          { kind: 'error', error: lateFailure },
+        ]);
+        expect(processErrors).toEqual([]);
       });
 
-      it('keeps the first outcome and rethrows a second done() call made synchronously', async () => {
-        const secondOutcome = new Error('second outcome');
+      // The shape of the verify callback @nestjs/passport builds around a strategy's
+      // validate(): it awaits validate() and then calls done() with its return value,
+      // even when validate() already called done() itself.
+      const wrapLikeNestJs =
+        (validate: (...params: Parameters<VerifyFunction>) => unknown): VerifyFunction =>
+        (parsedToken, googleId, done) => {
+          void (async () => {
+            try {
+              done(null, await validate(parsedToken, googleId, done));
+            } catch (err) {
+              done(err instanceof Error ? err : new Error(String(err)), null);
+            }
+          })();
+        };
+
+      it('never throws into a wrapper that calls done() again after verify did', async () => {
         const { strategy } = createStrategy(
           {},
-          vi.fn<VerifyFunction>((_t, _id, done) => {
-            done(null, USER, INFO);
-            done(secondOutcome);
-          }),
+          vi.fn<VerifyFunction>(
+            wrapLikeNestJs((_t, _id, done) => {
+              done(null, USER, INFO);
+            }),
+          ),
         );
-        const { result, processErrors } = await captureUnhandledRejections(() =>
-          runStrategy(strategy, idTokenRequest()),
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 2 }),
         );
-        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
-        expect(processErrors).toEqual([ALREADY_SETTLED]);
-        expect(processErrors[0]).toHaveProperty('cause', secondOutcome);
+        expect(result).toEqual([
+          { kind: 'success', user: USER, info: INFO },
+          { kind: 'fail', challenge: undefined, status: 401 },
+        ]);
+        expect(processErrors).toEqual([]);
       });
 
-      it('throws from a second done() call made later, in the caller of done()', async () => {
+      it('reports an error passed to done(), then the done() call the wrapper makes', async () => {
+        const failure = new Error('database is down');
         const { strategy } = createStrategy(
           {},
-          vi.fn<VerifyFunction>((_t, _id, done) => {
-            done(null, USER, INFO);
-            setImmediate(() => done(null, false));
-          }),
+          vi.fn<VerifyFunction>(
+            wrapLikeNestJs((_t, _id, done) => {
+              done(failure);
+            }),
+          ),
         );
-        const { result, processErrors } = await captureUncaughtExceptions(() =>
-          runStrategy(strategy, idTokenRequest()),
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 2 }),
         );
-        expect(result).toEqual({ kind: 'success', user: USER, info: INFO });
-        expect(processErrors).toEqual([ALREADY_SETTLED]);
+        expect(result).toEqual([
+          { kind: 'error', error: failure },
+          { kind: 'fail', challenge: undefined, status: 401 },
+        ]);
+        expect(processErrors).toEqual([]);
       });
 
-      it('throws from done() called after the verify callback threw', async () => {
-        const failure = new Error('bug in verify');
-        const { strategy } = createStrategy(
-          {},
-          vi.fn<VerifyFunction>((_t, _id, done) => {
-            setImmediate(() => done(null, USER, INFO));
+      it('reports a single outcome when the wrapped verify returns the user instead of calling done()', async () => {
+        const { strategy } = createStrategy({}, vi.fn<VerifyFunction>(wrapLikeNestJs(() => USER)));
+        const outcome = await runStrategy(strategy, idTokenRequest());
+        expect(outcome).toEqual({ kind: 'success', user: USER, info: undefined });
+      });
+    });
+
+    describe('when an exception escapes after an outcome', () => {
+      const idTokenRequest = () => ({ headers: {}, body: { id_token: signIdToken() } });
+      const throwingOnFirst = (failure: Error) => {
+        let thrown = false;
+        return () => {
+          if (!thrown) {
+            thrown = true;
             throw failure;
-          }),
+          }
+        };
+      };
+
+      it('reports an exception thrown while reporting a done() call as an error, as passport-local does', async () => {
+        const downstreamFailure = new Error('route handler failed');
+        const { strategy } = createStrategy();
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 2, onOutcome: throwingOnFirst(downstreamFailure) }),
         );
-        const { result, processErrors } = await captureUncaughtExceptions(() =>
-          runStrategy(strategy, idTokenRequest()),
+        expect(result).toEqual([
+          { kind: 'success', user: USER, info: INFO },
+          { kind: 'error', error: downstreamFailure },
+        ]);
+        expect(processErrors).toEqual([]);
+      });
+
+      it.each([
+        { token: 'is missing', req: () => ({ headers: {} }) },
+        { token: 'is rejected', req: () => ({ headers: {}, body: { id_token: signIdToken({}, { trusted: false }) } }) },
+      ])(
+        'leaves an exception thrown while failing a token that $token unhandled, without reporting an error',
+        async ({ req }) => {
+          const downstreamFailure = new Error('failure handler failed');
+          const { strategy } = createStrategy();
+          const { result, processErrors } = await captureProcessErrors(() =>
+            collectOutcomes(strategy, req(), { expected: 1, onOutcome: throwingOnFirst(downstreamFailure) }),
+          );
+          expect(result).toMatchObject([{ kind: 'fail', status: 401 }]);
+          expect(processErrors).toEqual([downstreamFailure]);
+        },
+      );
+
+      it('leaves a rejection from an async verify callback unhandled, as other Passport strategies do', async () => {
+        const lateFailure = new Error('bug after done');
+        // A plain function rather than vi.fn(): a mock subscribes to the promise it returns,
+        // which would mark the rejection as handled.
+        // eslint-disable-next-line @typescript-eslint/no-misused-promises -- simulating careless user code
+        const asyncVerify: VerifyFunction = async (_t, _id, done) => {
+          done(null, USER, INFO);
+          await Promise.resolve();
+          throw lateFailure;
+        };
+        const strategy = new Strategy({ clientID: CLIENT_ID }, asyncVerify);
+        const { result, processErrors } = await captureProcessErrors(() =>
+          collectOutcomes(strategy, idTokenRequest(), { expected: 1 }),
         );
-        expect(result).toEqual({ kind: 'error', error: failure });
-        expect(processErrors).toEqual([ALREADY_SETTLED]);
+        expect(result).toEqual([{ kind: 'success', user: USER, info: INFO }]);
+        expect(processErrors).toEqual([lateFailure]);
       });
     });
   });

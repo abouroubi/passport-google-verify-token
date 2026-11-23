@@ -104,7 +104,6 @@ When a token is rejected, the strategy passes Passport an info object whose `mes
 - **Access tokens must be issued to your app.** Their tokeninfo `aud` must be one of `audience` (defaults to `clientID`). Previously any valid Google access token was accepted.
 - **Google outages are errors, not failures.** When Google cannot be reached or answers with a server error, the strategy calls `error()` (HTTP 500) instead of `fail()` (HTTP 401). An exception thrown by the verify callback is also reported as an error.
 - **Tokens must identify an account.** A token or profile without a `sub` fails authentication. `googleId` is always that `sub` string; it used to fall back to the whole token.
-- **Call `done` exactly once.** Calling it again, or throwing after calling it, is rethrown as an uncaught error instead of answering the request a second time.
 - **Types:** `ParsedToken` and `TokenRequest` describe the verified identity and the request; `audience` is exposed as a `string[]`; `done`, `verifyGoogleIdToken` and `verifyGoogleAccessToken` are no longer public methods.
 
 ## Credits
