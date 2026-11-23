@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.1](https://github.com/abouroubi/passport-google-verify-token/compare/v4.0.0...v4.0.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **strategy:** report every done() call to passport like other strategies ([b763983](https://github.com/abouroubi/passport-google-verify-token/commit/b7639832ef1b10ddb2934ab741b0c6aa81840b9d))
+* **strategy:** report every done() call to passport like other strategies ([941cfbd](https://github.com/abouroubi/passport-google-verify-token/commit/941cfbd2ab5e547fff279b1556d62b48f8894541))
+
 ## [4.0.0](https://github.com/abouroubi/passport-google-verify-token/compare/v3.0.5...v4.0.0) (2026-11-22)
 
 
