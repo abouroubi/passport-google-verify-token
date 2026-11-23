@@ -128,13 +128,20 @@ export class GoogleTokenStrategy extends Strategy {
   }
 
   public authenticate(req: TokenRequest): void {
+    void this.authenticateRequest(req);
+  }
+
+  private async authenticateRequest(req: TokenRequest): Promise<void> {
     // Passport ignores authenticate()'s return value, so a token check that rejects
-    // must be reported through this.error(). Unlike catch(), then()'s rejection handler
-    // only sees the token check, never an exception thrown while reporting the outcome.
-    void this.checkRequest(req).then(
-      (check) => this.verifyChecked(req, check),
-      (err: unknown) => this.error(toError(err)),
-    );
+    // must be reported through this.error().
+    let check: TokenCheck;
+    try {
+      check = await this.checkRequest(req);
+    } catch (err) {
+      this.error(toError(err));
+      return;
+    }
+    this.verifyChecked(req, check);
   }
 
   private async checkRequest(req: TokenRequest): Promise<TokenCheck> {
